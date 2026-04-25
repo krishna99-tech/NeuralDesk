@@ -1,0 +1,38 @@
+# NeuralDesk User Guide: Getting Started
+
+Welcome to NeuralDesk! This guide will walk you through setting up your account and starting your first conversation with our intelligent assistant.
+
+---
+
+## 1. Creating Your Account (Sign Up)
+
+Before you can use the advanced features of NeuralDesk, you'll need to create a local profile. Your data is stored securely on your own machine.
+
+1.  Launch the application and navigate to the **Sign Up** screen.
+2.  **Username**: Choose a unique name for your profile.
+3.  **Email**: Enter your email address. This is used for profile identification.
+4.  **Password**: Create a strong password to keep your local chat history private.
+5.  Click the **Sign Up** button to create your profile.
+
+---
+
+## 2. Signing In (Login)
+
+Once your account is created, follow these steps to access your workspace:
+
+1.  On the **Login** screen, enter the **Username** and **Password** you created.
+2.  Click **Login**.
+3.  Upon successful login, the app will automatically load your previous chat history and settings.
+
+---
+
+## 3. Starting Your First Chat
+
+NeuralDesk makes interacting with AI simple and powerful:
+
+-   **Asking a Question**: Type your message into the text box at the bottom of the screen and press **Enter** or click the **Send** icon.
+-   **Switching Agents**: Use the dropdown menu in the sidebar to select different AI "Agents." Each agent can be configured for specific tasks (like coding, creative writing, or data analysis).
+-   **MCP Tools**: If you see the "MCP" toggle enabled, the assistant can use local tools to analyze files or databases (like MongoDB) and present the data to you in clean tables or charts.
+-   **Managing History**: Your recent chats are saved in the sidebar. You can click on any previous chat to pick up exactly where you left off.
+
+Enjoy using NeuralDesk!

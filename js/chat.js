@@ -1,0 +1,625 @@
+/**
+ * NeuralDesk Chat & Messaging
+ * Handles conversation flow, agent invocation, and persistence.
+ */
+
+function sendMessage() {
+  if (window.streamState.isGenerating) return;
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  // Initialize a new chat session if none active
+  if (!window.state.currentChatId) {
+    const newId = 'c_' + Date.now();
+    const newChat = {
+      id: newId,
+      title: text.substring(0, 30) + (text.length > 30 ? '...' : ''),
+      timestamp: new Date().toISOString(),
+      messages: []
+    };
+    window.appData.chatHistory.unshift(newChat);
+    window.state.currentChatId = newId;
+    renderRecentChats();
+  }
+
+  addMessage('user', text);
+  window.state.messages.push({ role: 'user', content: text });
+  
+  // Update history in memory
+  const chat = window.appData.chatHistory.find(c => c.id === window.state.currentChatId);
+  if (chat) {
+    chat.messages = window.state.messages;
+    chat.timestamp = new Date().toISOString();
+    saveChatHistory();
+  }
+
+  input.value = '';
+  input.style.height = 'auto';
+  requestAgentResponse();
+}
+
+/**
+ * Add a message bubble to the UI
+ */
+function addMessage(role, content, opts = {}) {
+  const screen = document.getElementById('welcomeScreen');
+  if (screen) screen.remove();
+  
+  const container = document.getElementById('chatMessages');
+  const isUser = role === 'user';
+  const userName = window.state.user?.username || 'Guest';
+  
+  const row = document.createElement('div');
+  row.className = `message-row ${isUser ? 'user' : ''}`;
+  
+  const avatarEl = document.createElement('div');
+  avatarEl.className = `msg-avatar ${isUser ? 'user-av' : 'ai'}`;
+  avatarEl.textContent = isUser ? userName.charAt(0).toUpperCase() : '✦';
+
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+
+  if (!isUser) {
+    const sender = document.createElement('div');
+    sender.className = 'msg-sender';
+    const agent = document.getElementById('agentSelect')?.value || 'auto';
+    sender.innerHTML = `<span>NeuralDesk</span><span class="model-tag">${agent.toUpperCase()}</span>`;
+    body.appendChild(sender);
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = `msg-bubble ${isUser ? 'user-msg' : 'ai'}`;
+  if (opts.id) bubble.id = opts.id + '_bubble';
+
+  const msgContent = document.createElement('div');
+  if (opts.id) msgContent.id = opts.id;
+  if (opts.streaming) msgContent.className = 'streaming-cursor';
+  msgContent.textContent = content;
+  
+  bubble.appendChild(msgContent);
+
+  if (opts.mcpResults && opts.mcpResults.length > 0) {
+    renderMcpVisualization(bubble, opts.mcpResults);
+  }
+
+  body.appendChild(bubble);
+
+  if (isUser) { row.appendChild(body); row.appendChild(avatarEl); }
+  else { row.appendChild(avatarEl); row.appendChild(body); }
+
+  container.appendChild(row);
+  container.scrollTop = container.scrollHeight;
+
+  return msgContent;
+}
+
+/**
+ * Render MCP tool outputs as interactive cards and tables
+ */
+function renderMcpVisualization(container, results) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'mcp-viz-container';
+  wrapper.style.marginTop = '12px';
+  wrapper.style.borderTop = '1px solid rgba(255,255,255,0.1)';
+  wrapper.style.paddingTop = '12px';
+
+  const title = document.createElement('div');
+  title.className = 'text-xs font-bold text-muted uppercase mb-2';
+  title.style.letterSpacing = '0.5px';
+  title.textContent = 'MCP Tool Output';
+  wrapper.appendChild(title);
+
+  results.forEach(res => {
+    const card = document.createElement('div');
+    card.style.background = 'rgba(255,255,255,0.03)';
+    card.style.borderRadius = '8px';
+    card.style.padding = '12px';
+    card.style.marginBottom = '10px';
+    card.style.border = '1px solid rgba(255,255,255,0.05)';
+
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.justifyContent = 'space-between';
+    header.style.alignItems = 'center';
+    header.style.marginBottom = '8px';
+
+    const name = document.createElement('span');
+    name.style.fontSize = '12px';
+    name.style.fontWeight = 'bold';
+    name.textContent = res.name;
+    
+    const status = document.createElement('span');
+    status.className = `chip ${res.ok ? 'chip-purple' : 'chip-red'}`;
+    status.style.fontSize = '9px';
+    status.textContent = res.ok ? 'SUCCESS' : 'FAILED';
+
+    header.appendChild(name);
+    header.appendChild(status);
+    card.appendChild(header);
+
+    let parsedData = null;
+    try {
+      if (res.stdout && (res.stdout.trim().startsWith('{') || res.stdout.trim().startsWith('['))) {
+        parsedData = JSON.parse(res.stdout);
+      }
+    } catch (e) {}
+
+    if (parsedData) {
+      card.appendChild(renderStructuredData(parsedData));
+    } else if (res.stdout) {
+      card.appendChild(renderUnstructuredData(res.stdout));
+    }
+
+    if (res.stderr) {
+      const err = document.createElement('div');
+      err.style.fontSize = '11px';
+      err.style.color = '#ff6b6b';
+      err.style.marginTop = '6px';
+      err.style.padding = '6px';
+      err.style.background = 'rgba(255,107,107,0.05)';
+      err.style.borderRadius = '4px';
+      err.textContent = res.stderr;
+      card.appendChild(err);
+    }
+
+    wrapper.appendChild(card);
+  });
+
+  container.appendChild(wrapper);
+}
+
+/**
+ * Detects CSV/SQL and renders specialized components or fallback pre
+ */
+function renderUnstructuredData(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return document.createElement('div');
+
+  // 1. Detect CSV (multiple lines, consistent delimiters)
+  const lines = trimmed.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length > 1) {
+    const firstLine = lines[0];
+    const delimiter = firstLine.includes(',') ? ',' : (firstLine.includes('\t') ? '\t' : (firstLine.includes(';') ? ';' : null));
+    
+    if (delimiter) {
+      const headerCols = firstLine.split(delimiter);
+      if (headerCols.length > 1) {
+        // Verify consistency in first few rows
+        const sample = lines.slice(1, 4);
+        const isConsistent = sample.length > 0 && sample.every(l => l.split(delimiter).length === headerCols.length);
+        
+        if (isConsistent) {
+          const tableData = lines.slice(1).map(line => {
+            const cols = line.split(delimiter);
+            const row = {};
+            headerCols.forEach((h, i) => {
+              row[h.trim() || `col_${i}`] = cols[i]?.trim() || '';
+            });
+            return row;
+          });
+          return renderStructuredData(tableData);
+        }
+      }
+    }
+  }
+
+  // 2. Detect SQL (Common keywords)
+  const sqlPattern = /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRUNCATE|DESCRIBE|EXEC|WITH|JOIN)\b/i;
+  if (sqlPattern.test(trimmed)) {
+    const pre = document.createElement('pre');
+    pre.style.fontSize = '11px';
+    pre.style.background = 'rgba(0,0,0,0.2)';
+    pre.style.padding = '10px';
+    pre.style.borderRadius = '4px';
+    pre.style.color = '#fff';
+    pre.style.borderLeft = '3px solid var(--accent)';
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.style.overflowX = 'auto';
+    
+    // Very basic syntax highlighting
+    const html = trimmed
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/\b(SELECT|FROM|WHERE|AND|OR|IN|VALUES|INSERT|INTO|UPDATE|SET|DELETE|CREATE|TABLE|DATABASE|JOIN|LEFT|RIGHT|INNER|OUTER|ON|ORDER|BY|GROUP|LIMIT|OFFSET|AS|WITH|UNION|ALL|DESC|ASC|DISTINCT)\b/gi, 
+        '<span style="color:#ff79c6;font-weight:bold">$1</span>')
+      .replace(/(--.*$)/gm, '<span style="color:#6272a4">$1</span>')
+      .replace(/'([^']*)'/g, '<span style="color:#f1fa8c">\'$1\'</span>');
+    
+    pre.innerHTML = html;
+    return pre;
+  }
+
+  // Default fallback
+  const pre = document.createElement('pre');
+  pre.style.fontSize = '11px';
+  pre.style.opacity = '0.7';
+  pre.style.whiteSpace = 'pre-wrap';
+  pre.style.maxHeight = '150px';
+  pre.style.overflowY = 'auto';
+  pre.style.margin = '0';
+  pre.textContent = text;
+  return pre;
+}
+
+function renderStructuredData(data) {
+  const div = document.createElement('div');
+  if (data.databases && data.summary) {
+    // Enhanced visualization for MongoDB Analysis Report
+    const header = document.createElement('div');
+    header.style.marginBottom = '12px';
+    header.style.padding = '4px 0';
+    header.innerHTML = `
+      <div style="font-size: 10px; opacity: 0.6; margin-bottom: 6px; font-family: monospace;">SOURCE: ${data.source || 'N/A'}</div>
+      <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;">
+        ${data.databases.map(db => `<span class="chip" style="font-size: 10px; padding: 2px 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">${db}</span>`).join('')}
+      </div>
+    `;
+    div.appendChild(header);
+
+    data.summary.forEach(item => {
+      const block = document.createElement('div');
+      block.style.background = 'rgba(255,255,255,0.02)';
+      block.style.padding = '12px';
+      block.style.borderRadius = '8px';
+      block.style.marginBottom = '10px';
+      block.style.borderLeft = '3px solid var(--accent)';
+      block.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+
+      let analysisHtml = '';
+      if (item.sample_analysis) {
+        const sa = item.sample_analysis;
+        if (sa.error) {
+          analysisHtml = `
+            <div style="margin-top: 10px; padding: 8px; background: rgba(255,107,107,0.05); border-radius: 4px; border: 1px solid rgba(255,107,107,0.1);">
+              <div style="font-size: 10px; color: #ff6b6b; display: flex; align-items: center; gap: 4px;">
+                <span>⚠️</span> <span>${sa.error}</span>
+              </div>
+            </div>`;
+        } else {
+          const keys = sa.schema_keys || sa.keys || [];
+          analysisHtml = `
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.05);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 10px; font-weight: bold; color: var(--accent2)">Sample: ${sa.collection || 'document'}</span>
+                <span style="font-size: 9px; opacity: 0.6;">Docs: ${sa.total_documents || sa.count || 0}</span>
+              </div>
+              <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                ${keys.map(k => `<span style="font-size: 9px; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05); font-family: monospace;">${k}</span>`).join('')}
+              </div>
+            </div>`;
+        }
+      }
+
+      block.innerHTML = `
+        <div style="font-size:13px; font-weight:bold; color:var(--accent); margin-bottom: 4px;">${item.database}</div>
+        <div style="font-size:10px; opacity:0.6; line-height: 1.4;">Collections: <span style="opacity: 1; color: #fff;">${Array.isArray(item.collections) ? item.collections.join(', ') : 'none'}</span></div>
+        ${analysisHtml}
+      `;
+      div.appendChild(block);
+    });
+  } else if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
+    // Check if data is plottable (contains numeric values)
+    const keys = Object.keys(data[0]);
+    const numericKeys = keys.filter(k => typeof data[0][k] === 'number' || (!isNaN(parseFloat(data[0][k])) && isFinite(data[0][k])));
+    const isPlottable = numericKeys.length > 0 && data.length > 1;
+
+    const tableView = document.createElement('div');
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.fontSize = '10px';
+    table.style.borderCollapse = 'collapse';
+    const trH = document.createElement('tr');
+    keys.forEach(k => {
+      const th = document.createElement('th');
+      th.style.textAlign = 'left';
+      th.style.padding = '4px';
+      th.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
+      th.textContent = k;
+      trH.appendChild(th);
+    });
+    table.appendChild(trH);
+    data.slice(0, 5).forEach(row => {
+      const tr = document.createElement('tr');
+      keys.forEach(k => {
+        const td = document.createElement('td');
+        td.style.padding = '4px';
+        td.textContent = String(row[k]).substring(0, 50);
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    tableView.appendChild(table);
+
+    if (isPlottable) {
+      const toggleContainer = document.createElement('div');
+      toggleContainer.style.display = 'flex';
+      toggleContainer.style.gap = '8px';
+      toggleContainer.style.marginBottom = '12px';
+
+      const createBtn = (label, active = false) => {
+        const btn = document.createElement('button');
+        btn.textContent = label;
+        btn.style.fontSize = '10px';
+        btn.style.padding = '4px 10px';
+        btn.style.borderRadius = '4px';
+        btn.style.border = active ? '1px solid var(--accent)' : '1px solid rgba(255,255,255,0.1)';
+        btn.style.background = active ? 'var(--accent)' : 'rgba(255,255,255,0.05)';
+        btn.style.color = '#fff';
+        btn.style.cursor = 'pointer';
+        btn.style.transition = 'all 0.2s';
+        return btn;
+      };
+
+      const chartBtn = createBtn('Chart View', true);
+      const tableBtn = createBtn('Table View', false);
+
+      const chartView = document.createElement('div');
+      chartView.style.margin = '15px 0';
+      chartView.style.padding = '15px';
+      chartView.style.background = 'rgba(0,0,0,0.2)';
+      chartView.style.borderRadius = '8px';
+      chartView.style.border = '1px solid rgba(255,255,255,0.1)';
+
+      const chartTitle = document.createElement('div');
+      chartTitle.className = 'text-xs font-bold mb-3 uppercase opacity-60';
+      chartTitle.textContent = `Data Visualization: ${numericKeys[0]}`;
+      chartView.appendChild(chartTitle);
+
+      const barWrapper = document.createElement('div');
+      barWrapper.style.display = 'flex';
+      barWrapper.style.alignItems = 'flex-end';
+      barWrapper.style.gap = '4px';
+      barWrapper.style.height = '120px';
+      barWrapper.style.paddingBottom = '20px';
+
+      const values = data.map(d => parseFloat(d[numericKeys[0]])).filter(v => !isNaN(v));
+      const max = Math.max(...values, 1);
+
+      data.slice(0, 20).forEach((row, i) => {
+        const val = parseFloat(row[numericKeys[0]]);
+        if (isNaN(val)) return;
+        const barGroup = document.createElement('div');
+        barGroup.style.flex = '1';
+        barGroup.style.display = 'flex';
+        barGroup.style.flexDirection = 'column';
+        barGroup.style.alignItems = 'center';
+        barGroup.style.height = '100%';
+        barGroup.style.justifyContent = 'flex-end';
+        const bar = document.createElement('div');
+        const heightPct = (val / max) * 100;
+        bar.style.width = '100%';
+        bar.style.height = `${heightPct}%`;
+        bar.style.background = 'var(--accent)';
+        bar.style.borderRadius = '2px 2px 0 0';
+        bar.style.minHeight = '2px';
+        bar.style.transition = 'height 0.3s ease';
+        bar.title = `${numericKeys[0]}: ${val}`;
+        const label = document.createElement('div');
+        label.style.fontSize = '8px';
+        label.style.marginTop = '4px';
+        label.style.opacity = '0.5';
+        label.style.width = '100%';
+        label.style.textAlign = 'center';
+        label.style.overflow = 'hidden';
+        label.style.textOverflow = 'ellipsis';
+        label.style.whiteSpace = 'nowrap';
+        const labelKey = keys.find(k => ['name', 'id', 'timestamp', 'created_at', 'label', 'time'].includes(k.toLowerCase())) || keys[0];
+        label.textContent = row[labelKey];
+        barGroup.appendChild(bar);
+        barGroup.appendChild(label);
+        barWrapper.appendChild(barGroup);
+      });
+
+      chartView.appendChild(barWrapper);
+      tableView.style.display = 'none';
+
+      chartBtn.onclick = () => {
+        chartView.style.display = 'block';
+        tableView.style.display = 'none';
+        chartBtn.style.background = 'var(--accent)';
+        chartBtn.style.border = '1px solid var(--accent)';
+        tableBtn.style.background = 'rgba(255,255,255,0.05)';
+        tableBtn.style.border = '1px solid rgba(255,255,255,0.1)';
+      };
+
+      tableBtn.onclick = () => {
+        chartView.style.display = 'none';
+        tableView.style.display = 'block';
+        tableBtn.style.background = 'var(--accent)';
+        tableBtn.style.border = '1px solid var(--accent)';
+        chartBtn.style.background = 'rgba(255,255,255,0.05)';
+        chartBtn.style.border = '1px solid rgba(255,255,255,0.1)';
+      };
+
+      toggleContainer.appendChild(chartBtn);
+      toggleContainer.appendChild(tableBtn);
+      div.appendChild(toggleContainer);
+      div.appendChild(chartView);
+    }
+    div.appendChild(tableView);
+  } else {
+    const pre = document.createElement('pre');
+    pre.style.fontSize = '10px';
+    pre.style.margin = '0';
+    pre.textContent = JSON.stringify(data, null, 2);
+    div.appendChild(pre);
+  }
+  return div;
+}
+
+/**
+ * Invoke the Backend Agent Layer
+ */
+async function requestAgentResponse() {
+  const id = 'm_' + Date.now();
+  const el = addMessage('ai', '', { id, streaming: true });
+  const requestId = 'r_' + Date.now();
+  const chatIdAtRequest = window.state.currentChatId;
+  window.streamState.activeRequestId = requestId;
+  const isStale = () =>
+    window.streamState.activeRequestId !== requestId ||
+    window.state.currentChatId !== chatIdAtRequest;
+  
+  const agent = document.getElementById('agentSelect')?.value || 'auto';
+  const modelType = document.getElementById('modelTypeSelect')?.value || 'fast';
+  const input = window.state.messages[window.state.messages.length - 1]?.content || '';
+  const tools = getSelectedTools();
+
+  try {
+    setGenerating(true);
+    
+    // Call the intelligent Agent Router via SQLite-integrated IPC
+    const response = await window.api.askAI({ 
+      input, 
+      agent, 
+      modelType,
+      tools
+    });
+
+    if (isStale()) {
+      const row = el.closest('.message-row');
+      if (row) row.remove();
+      return;
+    }
+
+    if (typeof response === 'object' && response !== null) {
+      el.textContent = response.text;
+      if (response.mcpResults && response.mcpResults.length > 0) {
+        renderMcpVisualization(el.parentElement, response.mcpResults);
+      }
+      window.state.messages.push({ 
+        role: 'assistant', 
+        content: response.text, 
+        mcpResults: response.mcpResults 
+      });
+    } else {
+      el.textContent = response;
+      window.state.messages.push({ role: 'assistant', content: response });
+    }
+
+    el.classList.remove('streaming-cursor');
+
+    // Finalize chat persistence
+    const chat = window.appData.chatHistory.find(c => c.id === window.state.currentChatId);
+    if (chat) { 
+      chat.messages = window.state.messages; 
+      saveChatHistory(); 
+    }
+  } catch (error) {
+    if (isStale()) return;
+    console.error('Agent Request failed:', error);
+    showToast(`Agent Error: ${error.message}`, 'error');
+    el.textContent = "I'm sorry, the agent encountered an error processing your request.";
+    el.classList.remove('streaming-cursor');
+  } finally {
+    if (window.streamState.activeRequestId === requestId) {
+      window.streamState.activeRequestId = null;
+      setGenerating(false);
+    }
+  }
+}
+
+function setGenerating(isGenerating) {
+  window.streamState.isGenerating = isGenerating;
+  const sendBtn = document.getElementById('sendBtn');
+  if (sendBtn) sendBtn.disabled = isGenerating;
+}
+
+async function saveChatHistory() {
+  await window.db.saveChats(window.appData.chatHistory);
+}
+
+function onModelChange() {
+  updatePrimaryChatTabLabel();
+}
+
+function updatePrimaryChatTabLabel() {
+  const agent = document.getElementById('agentSelect');
+  const tabLabel = document.getElementById('primaryChatTabLabel');
+  if (!agent || !tabLabel) return;
+  tabLabel.textContent = `Chat — ${agent.options[agent.selectedIndex].text}`;
+}
+
+function loadChatById(id) {
+  window.state.currentChatId = id;
+  const chat = window.appData.chatHistory.find(c => c.id === id);
+  if (!chat) return;
+  
+  window.state.messages = chat.messages || [];
+  renderMessages();
+  renderRecentChats();
+}
+
+async function deleteChatById(id) {
+  const index = window.appData.chatHistory.findIndex(c => c.id === id);
+  if (index === -1) return;
+
+  const target = window.appData.chatHistory[index];
+  const label = target?.title || 'this chat';
+  const confirmed = window.confirm(`Delete "${label}"? This cannot be undone.`);
+  if (!confirmed) return;
+
+  window.appData.chatHistory.splice(index, 1);
+  const deletedActiveChat = window.state.currentChatId === id;
+
+  if (deletedActiveChat) {
+    if (window.streamState.isGenerating) {
+      window.streamState.activeRequestId = null;
+      setGenerating(false);
+      const activeStream = document.querySelector('.streaming-cursor');
+      if (activeStream) {
+        const row = activeStream.closest('.message-row');
+        if (row) row.remove();
+      }
+    }
+
+    const nextChat = window.appData.chatHistory[0];
+    if (nextChat) {
+      loadChatById(nextChat.id);
+    } else {
+      window.state.currentChatId = null;
+      window.state.messages = [];
+      await saveChatHistory();
+      location.reload();
+      return;
+    }
+  } else {
+    renderRecentChats();
+  }
+
+  await saveChatHistory();
+  showToast('Chat deleted', 'success');
+}
+
+function cancelGeneration() {
+  if (!window.streamState.isGenerating) return;
+
+  window.streamState.activeRequestId = null;
+  setGenerating(false);
+
+  const activeStream = document.querySelector('.streaming-cursor');
+  if (activeStream) {
+    activeStream.textContent = 'Generation stopped.';
+    activeStream.classList.remove('streaming-cursor');
+  }
+  showToast('Generation cancelled', 'success');
+}
+
+function renderMessages() {
+  const container = document.getElementById('chatMessages');
+  container.innerHTML = '';
+  window.state.messages.forEach(msg => {
+    addMessage(msg.role, msg.content, { mcpResults: msg.mcpResults });
+  });
+}
+
+function newChat() {
+  window.state.messages = [];
+  window.state.currentChatId = null;
+  location.reload(); // Quick reset for the entire view state
+}
+
+function quickPrompt(text) {
+  document.getElementById('chatInput').value = text;
+  sendMessage();
+}

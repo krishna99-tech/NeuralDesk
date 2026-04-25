@@ -1,0 +1,158 @@
+
+If a dist folder is locked by a running app, close the app and run the build again.
+
+## Configure API Keys and Models
+
+1. Open app -> **Settings** -> **Integrations**
+2. Add one or more API keys:
+   - Gemini key (`Google AI Studio`)
+   - Anthropic key
+   - OpenAI/Groq/Mistral/Cohere-compatible keys
+3. Configure optional endpoints:
+   - `Custom OpenAI-compatible Base URL`
+   - `Ollama Base URL` (default: `http://127.0.0.1:11434`)
+4. Click **Save Keys**
+5. Select model from top dropdown
+6. Use **Test Connections** to verify
+
+Notes:
+
+- Gemini model availability differs by account/project; app auto-fallbacks when a selected Gemini model is unavailable.
+- Ollama requires local Ollama server running.
+
+## Add / Configure MCP Servers
+
+### From UI
+
+1. Open **Settings** -> **MCP Servers**
+2. Fill:
+   - Server Name
+   - Command
+   - Arguments (comma-separated)
+   - Environment Variables (`KEY=VALUE`, one per line)
+3. Click **+ Add MCP Server**
+4. MCP lists refresh in:
+   - right panel (`MCP` tab)
+   - settings MCP list
+5. To delete an entry, click **Remove** beside the server.
+
+This writes to local `mcp_config.json` in Electron user data and refreshes MCP list in app.
+
+### Use MCP during chat (real execution)
+
+1. In chat toolbar, enable **MCP**.
+2. Send your prompt.
+3. App executes matching configured MCP server command(s) locally and captures stdout/stderr.
+4. Chat response includes:
+   - normal LLM answer
+   - `MCP Tool Output` section with execution status and output summary
+
+Server selection behavior:
+- If your prompt mentions a configured MCP server name, that server is executed.
+- Otherwise, app executes up to first 3 configured MCP servers.
+- Optional `timeoutMs` per server can be set in `mcp_config.json` (default is `45000` ms).
+- For long-running MCP servers, set one-shot chat fields:
+  - `chatCommand`
+  - `chatArgs`
+  - `chatEnv` (optional)
+  - `chatTimeoutMs` (optional)
+  This lets app keep server auto-start for status while using a separate analyze-and-exit command in chat.
+
+### Edit raw MCP config
+
+- In MCP settings, click **Edit Config JSON**
+- This opens local `mcp_config.json` so you can edit directly.
+
+### `mcp_config.json` format
+
+NeuralDesk now uses a Claude Desktop-style object map:
+
+```json
+{
+  "mcpServers": {
+    "mongodb-analyzer": {
+      "command": "uv",
+      "args": ["run", "--directory", "C:\\Users\\vakav\\projects\\weather", "weather.py"],
+      "timeoutMs": 90000,
+      "chatCommand": "python",
+      "chatArgs": ["C:\\Users\\vakav\\projects\\weather\\analyze_once.py"],
+      "chatTimeoutMs": 30000,
+      "env": {
+        "MONGODB_URI": "mongodb://localhost:27017"
+      },
+      "chatEnv": {
+        "MONGODB_URI": "mongodb://localhost:27017"
+      }
+    }
+  }
+}
+```
+
+Compatibility note:
+- If an older array-style `mcpServers` config is found, the app normalizes it to the object format automatically.
+
+## Agent Configuration
+
+### Agent presets and panel config
+
+Edit:
+
+- `data/agent-config.json`
+
+You can customize:
+
+- Agent parameter sliders/toggles
+- System prompt snippet
+- Preset cards shown in **Settings -> Agent Presets**
+
+### Agent builder graph defaults
+
+Edit:
+
+- `data/nodes.json`
+
+You can customize:
+
+- Default nodes (`nodes`)
+- Connections between nodes (`connections`)
+
+### Providers and prompt presets
+
+Edit:
+
+- `data/config.json`
+
+You can customize:
+
+- Provider cards
+- Prompt preset templates
+- Active tool chips
+
+## Runtime Data Storage
+
+The app stores local runtime files in Electron `userData` directory:
+
+- `app_settings.json` (profile, theme, keys, selected model, endpoints)
+- `mcp_config.json` (MCP server entries)
+- `logs/mcp/*_startup.log` (MCP server startup/runtime logs with stdout/stderr)
+- `logs/mcp/*.log` (per MCP tool execution logs with stdout/stderr and metadata)
+
+## Security Notes
+
+- Keep API keys private.
+- Do not commit personal keys or local runtime JSON files to git.
+- Use key restrictions where supported by provider.
+
+## Troubleshooting
+
+- **Gemini 404 model not found**
+  - Model may not be enabled for your key/project.
+  - App retries with available model automatically.
+
+- **Gemini API_KEY_INVALID**
+  - Verify key from Google AI Studio.
+  - Re-save key in app (no `Bearer` prefix needed).
+
+- **Build EBUSY lock error**
+  - Close running packaged app instances and rebuild.
+

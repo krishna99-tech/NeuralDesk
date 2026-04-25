@@ -1,0 +1,27 @@
+{
+  "name": "neuraldesk-desktop",
+  "version": "1.0.0",
+  "description": "NeuralDesk desktop application built with Electron.",
+  "main": "main.js",
+  "author": "vakav",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "clean": "node -e \"const fs=require('fs'); ['dist','dist-test','dist-stream'].forEach(d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch(e){if(e.code!=='EBUSY') throw e; console.warn('skip busy dir:', d)}})\"",
+    "dist": "electron-packager . NeuralDesk --platform=win32 --arch=x64 --asar --overwrite --out=dist --prune=true --ignore=\"^/dist\" --ignore=\"^/\\.git$\"",
+    "dist:unpacked": "electron-packager . NeuralDesk --platform=win32 --arch=x64 --overwrite --out=dist --prune=true --ignore=\"^/dist\" --ignore=\"^/\\.git$\"",
+    "dist:prod": "npm run clean && npm run dist",
+    "build": "npm run clean && npm run dist"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "electron": "^36.0.0",
+    "electron-rebuild": "^3.2.9"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.15.2",
+    "better-sqlite3": "^12.9.0"
+  }
+}

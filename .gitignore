@@ -1,0 +1,28 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Build artifacts
+dist/
+out/
+build/
+*.exe
+*.dmg
+*.AppImage
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local Runtime Data & Configuration
+# These files contain sensitive or environment-specific data
+app_settings.json
+mcp_config.json
+.env
+
+# OS metadata
+.DS_Store
+Thumbs.db
