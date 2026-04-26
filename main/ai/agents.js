@@ -1,5 +1,7 @@
 const callAI = require("./router");
 const MODELS = require("./models");
+const { Agent, tool } = require("@openai/agents");
+const { z } = require("zod");
 
 const agents = {
   analyzer: {
@@ -28,7 +30,90 @@ ${i}`
   local: {
     provider: "ollama",
     modelType: "fast",
-    prompt: (i) => `Process this request locally for maximum privacy:\n${i}`
+    name: "Local Agent",
+    instructions: "You are a local LLM running via Ollama. You provide fast, offline assistance."
+  },
+
+  deepseekAgent: {
+    provider: "deepseek",
+    modelType: "fast",
+    name: "DeepSeek Agent",
+    instructions: "You are a helpful assistant powered by DeepSeek AI."
+  },
+
+  historyTutor: {
+    provider: "openai",
+    modelType: "smart",
+    sdkAgent: true,
+    name: "History tutor",
+    instructions: "You answer history questions clearly and concisely. Use history_fun_fact when it helps.",
+    tools: [
+      tool({
+        name: "history_fun_fact",
+        description: "Return a short history fact.",
+        parameters: z.object({}),
+        async execute() {
+          return "Sharks are older than trees.";
+        },
+      })
+    ]
+  },
+
+  mathTutor: {
+    provider: "openai",
+    modelType: "smart",
+    sdkAgent: true,
+    name: "Math tutor",
+    instructions: "Explain math step by step and include worked examples."
+  },
+
+  triage: {
+    provider: "openai",
+    modelType: "smart",
+    sdkAgent: true,
+    name: "Homework triage",
+    instructions: "Route each homework question to the right specialist.",
+    handoffs: ["historyTutor", "mathTutor"]
+  },
+
+  master: {
+    provider: "openai",
+    modelType: "smart",
+    sdkAgent: true,
+    name: "Master Orchestrator",
+    instructions: `You are the central intelligence of NeuralDesk. 
+Your goal is to satisfy the user request by:
+1. Planning the necessary steps.
+2. Using tools to acquire information or perform actions.
+3. Handing off to specialist agents when their expertise is needed.
+
+Specialists:
+- historyTutor: Deep knowledge of history and ancient civilizations.
+- mathTutor: Mathematical problem solving and explanations.
+- analyzer: General data analysis and summarization.
+
+Always strive for the most accurate and helpful response.`,
+    handoffs: ["historyTutor", "mathTutor", "analyzer"],
+    tools: [
+      tool({
+        name: "search_local_files",
+        description: "Searches for a specific file or lists files in the current workspace to understand the project structure.",
+        parameters: z.object({
+          directory: z.string().optional().describe("Directory to search in (default is current workspace)")
+        }),
+        async execute({ directory }) {
+          const fs = require("fs");
+          const path = require("path");
+          const target = directory || process.cwd();
+          try {
+            const files = fs.readdirSync(target);
+            return `Files in ${target}:\n${files.join("\n")}`;
+          } catch (e) {
+            return `Error accessing directory: ${e.message}`;
+          }
+        }
+      })
+    ]
   }
 };
 
@@ -37,19 +122,97 @@ function getModel(provider, type) {
 }
 
 async function runAgent(name, input, overrideType) {
-  // Hardcoded Orchestration & Fallback
   const agentName = name || "analyzer";
   const a = agents[agentName] || agents.analyzer;
   
   if (!a) throw new Error(`Agent configuration missing for: ${agentName}`);
-  
-  const model = getModel(a.provider, overrideType || a.modelType);
 
-  return callAI({
-    provider: a.provider,
-    model,
-    prompt: a.prompt(input)
-  });
+  const execute = async (agentConfig, modelType) => {
+    const db = require("../db/sqlite");
+    const row = db.prepare("SELECT data FROM settings WHERE id = 1").get();
+    const settings = row ? JSON.parse(row.data) : {};
+    
+    // Determine provider: Agent config > Settings Default > OpenAI (fallback)
+    let provider = agentConfig.provider;
+    if ((!provider || provider === "smart") && settings.ai?.defaultProvider) {
+      provider = settings.ai.defaultProvider;
+    }
+    if (!provider) provider = "openai";
+
+    const model = getModel(provider, modelType || agentConfig.modelType);
+
+    // SDK-BASED AGENT EXECUTION (OpenAI specific)
+    if (agentConfig.sdkAgent && provider === "openai") {
+      const apiKey = settings.apiKeys?.openai;
+      const baseUrl = settings.endpoints?.openaiCompatibleBaseUrl;
+
+      if (!apiKey) throw new Error("OpenAI API Key is missing.");
+      process.env.OPENAI_API_KEY = apiKey;
+      if (baseUrl) process.env.OPENAI_BASE_URL = baseUrl;
+
+      const { run, Agent } = require("@openai/agents");
+
+      const handoffs = Array.isArray(agentConfig.handoffs) 
+        ? agentConfig.handoffs.map(h => {
+            const target = agents[h];
+            const targetProvider = target.provider || provider;
+            return new Agent({
+              name: target.name || h,
+              instructions: target.instructions,
+              model: getModel(targetProvider, target.modelType)
+            });
+          })
+        : [];
+
+      const sdkAgent = new Agent({
+        name: agentConfig.name || agentName,
+        instructions: agentConfig.instructions || settings.systemPrompt,
+        model: model,
+        tools: agentConfig.tools || [],
+        handoffs: handoffs
+      });
+
+      const result = await run(sdkAgent, input);
+      return { 
+        text: result.finalOutput,
+        lastAgent: result.lastAgent?.name,
+        model: model
+      };
+    }
+    
+    return {
+      text: (await callAI({
+        provider,
+        model,
+        prompt: typeof agentConfig.prompt === "function" ? agentConfig.prompt(input) : (agentConfig.instructions ? agentConfig.instructions + "\n\n" : "") + input
+      })).text,
+      model
+    };
+  };
+
+  try {
+    return await execute(a, overrideType);
+  } catch (err) {
+    const msg = String(err.message || "");
+    const isQuotaError = msg.includes("429") || msg.toLowerCase().includes("quota");
+    
+    if (isQuotaError && a.provider === "openai") {
+      console.warn("OpenAI Quota exceeded. Attempting automatic fallback to Gemini...");
+      const fallbackAgent = agents.geminiAgent;
+      try {
+        const result = await execute(fallbackAgent, overrideType);
+        return {
+          ...result,
+          text: `[Fallback from OpenAI due to Quota] ${result.text}`,
+          model: result.model
+        };
+      } catch (fallbackErr) {
+        console.error("Fallback also failed:", fallbackErr);
+        throw err; // Throw original error if fallback fails too
+      }
+    }
+    throw err;
+  }
 }
 
 // SMART AUTO ORCHESTRATION
@@ -58,6 +221,18 @@ async function autoAgent(input, preferredType = "fast") {
   const type = (preferredType === "smart" || preferredType === "fast") ? preferredType : "fast";
   
   // Hardcoded routing rules
+  if (query.includes("homework") || query.includes("triage")) {
+    return runAgent("triage", input, type);
+  }
+
+  if (query.includes("history") || query.includes("ancient") || query.includes("empire")) {
+    return runAgent("historyTutor", input, type);
+  }
+  
+  if (query.includes("math") || query.includes("calculate") || query.includes("solve")) {
+    return runAgent("mathTutor", input, type);
+  }
+
   if (query.includes("code") || query.includes("python") || query.includes("script")) {
     return runAgent("analyzer", input, type);
   }
@@ -66,10 +241,10 @@ async function autoAgent(input, preferredType = "fast") {
     return runAgent("geminiAgent", input, type);
   }
 
-  if (query.length > 300 || query.includes("explain") || query.includes("why")) {
-    return runAgent("reasoner", input, type);
+  if (query.length > 300 || query.includes("plan") || query.includes("orchestrate") || query.includes("complex")) {
+    return runAgent("master", input, "smart");
   }
-  
+
   return runAgent("analyzer", input, type);
 }
 

@@ -56,36 +56,14 @@ async function loadUserData() {
  */
 function hydrateUiFromData() {
   const name = window.state.user?.username || 'Guest';
-  const email = window.state.user?.email || '';
   const avatar = name.charAt(0).toUpperCase();
   
   document.getElementById('sidebarAvatar').textContent = avatar;
   document.getElementById('sidebarName').textContent = name;
   
-  // Update settings fields
-  const dn = document.getElementById('displayName');
-  if (dn) dn.value = name;
-  const ue = document.getElementById('userEmail');
-  if (ue) ue.value = email;
-
-  // Sync settings values to forms
-  const rs = window.state.runtimeSettings;
-  const setValue = (id, value) => {
-    const el = document.getElementById(id);
-    if (el && value !== undefined) el.value = value;
-  };
-  
-  if (rs) {
-    setValue('systemPromptText', rs.systemPrompt || '');
-    setValue('anthropicKey', rs.apiKeys?.anthropic || '');
-    setValue('geminiKey', rs.apiKeys?.gemini || '');
-    setValue('openaiKey', rs.apiKeys?.openai || '');
-    setValue('githubToken', rs.external?.github || '');
-    setValue('notionKey', rs.external?.notion || '');
-    setValue('discordWebhook', rs.external?.discord || '');
-    setValue('customBaseUrl', rs.endpoints?.openaiCompatibleBaseUrl || '');
-    setValue('ollamaBaseUrl', rs.endpoints?.ollamaBaseUrl || '');
-    if (rs.theme) setTheme(rs.theme, true);
+  // Delegate all settings population to the Settings Manager
+  if (window.settingsManager) {
+    window.settingsManager.hydrate();
   }
 
   // Render lists

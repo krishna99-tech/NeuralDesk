@@ -64,7 +64,8 @@ function addMessage(role, content, opts = {}) {
     const sender = document.createElement('div');
     sender.className = 'msg-sender';
     const agent = document.getElementById('agentSelect')?.value || 'auto';
-    sender.innerHTML = `<span>NeuralDesk</span><span class="model-tag">${agent.toUpperCase()}</span>`;
+    const modelTag = (opts.model || agent).toUpperCase();
+    sender.innerHTML = `<span>NeuralDesk</span><span class="model-tag">${modelTag}</span>`;
     body.appendChild(sender);
   }
 
@@ -243,61 +244,7 @@ function renderUnstructuredData(text) {
 
 function renderStructuredData(data) {
   const div = document.createElement('div');
-  if (data.databases && data.summary) {
-    // Enhanced visualization for MongoDB Analysis Report
-    const header = document.createElement('div');
-    header.style.marginBottom = '12px';
-    header.style.padding = '4px 0';
-    header.innerHTML = `
-      <div style="font-size: 10px; opacity: 0.6; margin-bottom: 6px; font-family: monospace;">SOURCE: ${data.source || 'N/A'}</div>
-      <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;">
-        ${data.databases.map(db => `<span class="chip" style="font-size: 10px; padding: 2px 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">${db}</span>`).join('')}
-      </div>
-    `;
-    div.appendChild(header);
-
-    data.summary.forEach(item => {
-      const block = document.createElement('div');
-      block.style.background = 'rgba(255,255,255,0.02)';
-      block.style.padding = '12px';
-      block.style.borderRadius = '8px';
-      block.style.marginBottom = '10px';
-      block.style.borderLeft = '3px solid var(--accent)';
-      block.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
-
-      let analysisHtml = '';
-      if (item.sample_analysis) {
-        const sa = item.sample_analysis;
-        if (sa.error) {
-          analysisHtml = `
-            <div style="margin-top: 10px; padding: 8px; background: rgba(255,107,107,0.05); border-radius: 4px; border: 1px solid rgba(255,107,107,0.1);">
-              <div style="font-size: 10px; color: #ff6b6b; display: flex; align-items: center; gap: 4px;">
-                <span>⚠️</span> <span>${sa.error}</span>
-              </div>
-            </div>`;
-        } else {
-          const keys = sa.schema_keys || sa.keys || [];
-          analysisHtml = `
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.05);">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <span style="font-size: 10px; font-weight: bold; color: var(--accent2)">Sample: ${sa.collection || 'document'}</span>
-                <span style="font-size: 9px; opacity: 0.6;">Docs: ${sa.total_documents || sa.count || 0}</span>
-              </div>
-              <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-                ${keys.map(k => `<span style="font-size: 9px; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05); font-family: monospace;">${k}</span>`).join('')}
-              </div>
-            </div>`;
-        }
-      }
-
-      block.innerHTML = `
-        <div style="font-size:13px; font-weight:bold; color:var(--accent); margin-bottom: 4px;">${item.database}</div>
-        <div style="font-size:10px; opacity:0.6; line-height: 1.4;">Collections: <span style="opacity: 1; color: #fff;">${Array.isArray(item.collections) ? item.collections.join(', ') : 'none'}</span></div>
-        ${analysisHtml}
-      `;
-      div.appendChild(block);
-    });
-  } else if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
+  if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
     // Check if data is plottable (contains numeric values)
     const keys = Object.keys(data[0]);
     const numericKeys = keys.filter(k => typeof data[0][k] === 'number' || (!isNaN(parseFloat(data[0][k])) && isFinite(data[0][k])));
@@ -484,13 +431,20 @@ async function requestAgentResponse() {
 
     if (typeof response === 'object' && response !== null) {
       el.textContent = response.text;
+      // Update the bubble with the real model name
+      const senderTag = el.closest('.msg-body')?.querySelector('.model-tag');
+      if (senderTag && response.model) {
+        senderTag.textContent = response.model.toUpperCase();
+      }
+
       if (response.mcpResults && response.mcpResults.length > 0) {
         renderMcpVisualization(el.parentElement, response.mcpResults);
       }
       window.state.messages.push({ 
         role: 'assistant', 
         content: response.text, 
-        mcpResults: response.mcpResults 
+        mcpResults: response.mcpResults,
+        model: response.model
       });
     } else {
       el.textContent = response;
@@ -609,7 +563,10 @@ function renderMessages() {
   const container = document.getElementById('chatMessages');
   container.innerHTML = '';
   window.state.messages.forEach(msg => {
-    addMessage(msg.role, msg.content, { mcpResults: msg.mcpResults });
+    addMessage(msg.role, msg.content, { 
+      mcpResults: msg.mcpResults,
+      model: msg.model 
+    });
   });
 }
 

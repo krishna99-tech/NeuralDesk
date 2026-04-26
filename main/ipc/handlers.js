@@ -1,6 +1,7 @@
 const { ipcMain, app, shell } = require("electron");
 const db = require("../db/sqlite");
 const { runAgent, autoAgent } = require("../ai/agents");
+const MODELS = require("../ai/models");
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
@@ -393,55 +394,6 @@ function getMcpChatExecutionSpec(name, server) {
     };
   }
 
-  // Convenience fallback: allow mongodb-analyzer to return real data
-  // even when only server-mode config is provided.
-  if (name === "mongodb-analyzer" && startupCommand === "uv") {
-    const dirIndex = startupArgs.findIndex((a) => String(a).trim() === "--directory");
-    const projectDir = dirIndex >= 0 ? String(startupArgs[dirIndex + 1] || "").trim() : "";
-    const serverScript = startupArgs.find((a) => String(a).toLowerCase().endsWith(".py")) || "weather.py";
-
-    if (projectDir) {
-      const esc = (v) => String(v || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-      const analysisScript = `
-import asyncio, importlib.util, json, os, traceback
-target = os.path.join(r"${esc(projectDir)}", r"${esc(serverScript)}")
-spec = importlib.util.spec_from_file_location("mongodb_analyzer_module", target)
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-
-async def run():
-    out = {"source": target}
-    out["ping"] = await mod.ping_mongodb()
-    dbs = await mod.list_databases()
-    out["databases"] = dbs[:10] if isinstance(dbs, list) else dbs
-    summary = []
-    if isinstance(dbs, list):
-        for db in dbs[:3]:
-            cols = await mod.list_collections(db)
-            row = {"database": db, "collections": cols[:10] if isinstance(cols, list) else cols}
-            if isinstance(cols, list) and len(cols) > 0:
-                row["sample_analysis"] = await mod.analyze_collection(db, cols[0])
-            summary.append(row)
-    out["summary"] = summary
-    print(json.dumps(out, ensure_ascii=False))
-
-try:
-    asyncio.run(run())
-except Exception as e:
-    print(json.dumps({"error": str(e), "trace": traceback.format_exc()}))
-`;
-
-      return {
-        mode: "one-shot",
-        name,
-        command: "uv",
-        args: ["run", "--directory", projectDir, "python", "-c", analysisScript],
-        env: startupEnv,
-        timeoutMs: Number(server?.chatTimeoutMs) > 0 ? Number(server.chatTimeoutMs) : 90000
-      };
-    }
-  }
-
   return {
     mode: "server",
     name,
@@ -520,12 +472,17 @@ ipcMain.handle("ask-ai", async (event, arg1, arg2, arg3) => {
 
     return {
       text: result.text,
-      mcpResults: mcpEnabled ? mcpResults : []
+      mcpResults: mcpEnabled ? mcpResults : [],
+      model: result.model
     };
   } catch (e) {
     console.error("IPC AskAI Error:", e);
     return `Error in Agent Flow: ${e.message}`;
   }
+});
+
+ipcMain.handle("get-models", async () => {
+  return MODELS;
 });
 
 ipcMain.handle("get-data", async () => {

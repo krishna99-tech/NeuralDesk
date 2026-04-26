@@ -22,7 +22,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const listener = (_event, data) => handler(data);
     ipcRenderer.on("llm-stream-chunk", listener);
     return () => ipcRenderer.removeListener("llm-stream-chunk", listener);
-  }
+  },
+  getModels: () => ipcRenderer.invoke("get-models")
 });
 
 // User requested standard API bridge

@@ -70,7 +70,7 @@ NeuralDesk now uses a Claude Desktop-style object map:
 ```json
 {
   "mcpServers": {
-    "mongodb-analyzer": {
+    "weather-server": {
       "command": "uv",
       "args": ["run", "--directory", "C:\\Users\\vakav\\projects\\weather", "weather.py"],
       "timeoutMs": 90000,
@@ -78,10 +78,7 @@ NeuralDesk now uses a Claude Desktop-style object map:
       "chatArgs": ["C:\\Users\\vakav\\projects\\weather\\analyze_once.py"],
       "chatTimeoutMs": 30000,
       "env": {
-        "MONGODB_URI": "mongodb://localhost:27017"
-      },
-      "chatEnv": {
-        "MONGODB_URI": "mongodb://localhost:27017"
+        "API_KEY": "your_weather_api_key"
       }
     }
   }

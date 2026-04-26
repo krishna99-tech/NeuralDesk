@@ -32,7 +32,7 @@ NeuralDesk makes interacting with AI simple and powerful:
 
 -   **Asking a Question**: Type your message into the text box at the bottom of the screen and press **Enter** or click the **Send** icon.
 -   **Switching Agents**: Use the dropdown menu in the sidebar to select different AI "Agents." Each agent can be configured for specific tasks (like coding, creative writing, or data analysis).
--   **MCP Tools**: If you see the "MCP" toggle enabled, the assistant can use local tools to analyze files or databases (like MongoDB) and present the data to you in clean tables or charts.
+-   **MCP Tools**: If you see the "MCP" toggle enabled, the assistant can use local tools to analyze files or databases and present the data to you in clean tables or charts.
 -   **Managing History**: Your recent chats are saved in the sidebar. You can click on any previous chat to pick up exactly where you left off.
 
 ---

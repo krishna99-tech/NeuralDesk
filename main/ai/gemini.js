@@ -1,12 +1,19 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-module.exports = async ({ prompt, model, apiKey }) => {
+module.exports = async ({ prompt, model, apiKey, systemPrompt, temperature, maxTokens }) => {
   if (!apiKey) throw new Error("Google Gemini API Key is missing. Please configure it in Settings.");
   const genAI = new GoogleGenerativeAI(apiKey);
   const requestedModel = model || "gemini-2.5-flash";
 
   try {
-    const m = genAI.getGenerativeModel({ model: requestedModel });
+    const m = genAI.getGenerativeModel({ 
+      model: requestedModel,
+      systemInstruction: systemPrompt || undefined,
+      generationConfig: {
+        temperature: temperature ?? 0.7,
+        maxOutputTokens: maxTokens ?? 2048
+      }
+    });
     const res = await m.generateContent(prompt);
     return { text: res.response.text() };
   } catch (err) {

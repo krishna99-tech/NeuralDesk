@@ -1,6 +1,7 @@
 const MODELS = {
   openai: {
     fast: "gpt-4o-mini",
+    latest: "gpt-5.5",
     smart: "gpt-4o",
     cheap: "gpt-3.5-turbo"
   },
@@ -15,6 +16,10 @@ const MODELS = {
   ollama: {
     fast: "llama3",
     smart: "mistral"
+  },
+  deepseek: {
+    fast: "deepseek-chat",
+    smart: "deepseek-reasoner"
   }
 };
 

@@ -1,24 +1,23 @@
-const axios = require("axios");
+const { Agent, run } = require("@openai/agents");
 
-module.exports = async ({ prompt, model, apiKey, baseUrl }) => {
+module.exports = async ({ prompt, model, apiKey, baseUrl, systemPrompt, temperature, maxTokens }) => {
   if (!apiKey) throw new Error("OpenAI API Key is missing. Please configure it in Settings.");
-  const url = baseUrl ? `${baseUrl.replace(/\/$/, "")}/chat/completions` : "https://api.openai.com/v1/chat/completions";
+  
+  // Set the API key for the SDK
+  process.env.OPENAI_API_KEY = apiKey;
+  if (baseUrl) process.env.OPENAI_BASE_URL = baseUrl;
+
   const requestedModel = model || "gpt-4o-mini";
-  const requestBody = {
+
+  const agent = new Agent({
+    name: "NeuralDesk Assistant",
+    instructions: systemPrompt || "You are a helpful assistant. Provide clear and concise answers.",
     model: requestedModel,
-    messages: [{ role: "user", content: prompt }]
-  };
-  const headers = {
-    Authorization: `Bearer ${apiKey}`
-  };
+  });
 
   try {
-    const res = await axios.post(url, requestBody, { headers });
-    const text = res?.data?.choices?.[0]?.message?.content;
-    if (typeof text !== "string") {
-      throw new Error("OpenAI returned an unexpected response format.");
-    }
-    return { text };
+    const result = await run(agent, prompt);
+    return { text: result.finalOutput };
   } catch (err) {
     const status = err?.response?.status ?? err?.status;
     const msg = err?.response?.data?.error?.message || err?.message || "";
@@ -29,16 +28,13 @@ module.exports = async ({ prompt, model, apiKey, baseUrl }) => {
           (msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("does not exist"))));
 
     if (isModelNotFound && requestedModel !== "gpt-4o-mini") {
-      const retry = await axios.post(
-        url,
-        { ...requestBody, model: "gpt-4o-mini" },
-        { headers }
-      );
-      const fallbackText = retry?.data?.choices?.[0]?.message?.content;
-      if (typeof fallbackText !== "string") {
-        throw new Error("OpenAI fallback returned an unexpected response format.");
-      }
-      return { text: fallbackText };
+      const fallbackAgent = new Agent({
+        name: "NeuralDesk Assistant (Fallback)",
+        instructions: "You are a helpful assistant.",
+        model: "gpt-4o-mini",
+      });
+      const result = await run(fallbackAgent, prompt);
+      return { text: result.finalOutput };
     }
 
     throw err;

@@ -52,7 +52,9 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@openai/agents": "^0.8.5",
     "axios": "^1.15.2",
-    "better-sqlite3": "^12.9.0"
+    "better-sqlite3": "^12.9.0",
+    "zod": "^4.3.6"
   }
 }

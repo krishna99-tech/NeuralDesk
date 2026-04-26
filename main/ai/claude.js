@@ -1,12 +1,14 @@
 const axios = require("axios");
 
-module.exports = async ({ prompt, model, apiKey }) => {
+module.exports = async ({ prompt, model, apiKey, systemPrompt, temperature, maxTokens }) => {
   if (!apiKey) throw new Error("Anthropic API Key is missing. Please configure it in Settings.");
   const requestedModel = model || "claude-3-haiku-20240307";
   const url = "https://api.anthropic.com/v1/messages";
   const body = {
     model: requestedModel,
-    max_tokens: 1024,
+    max_tokens: maxTokens ?? 2048,
+    temperature: temperature ?? 0.7,
+    system: systemPrompt || undefined,
     messages: [{ role: "user", content: prompt }]
   };
   const headers = {

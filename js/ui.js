@@ -48,49 +48,9 @@ function switchView(view, el) {
 /**
  * Settings Modal Management
  */
-function openSettings(pane = 'general') {
-  const modal = document.getElementById('settingsModal');
-  modal.classList.add('open');
-  switchSettingsPane(pane, document.querySelector(`[data-pane="${pane}"]`) || document.querySelector('.msidebar-item'));
-  if (pane === 'mcp') loadMcpServers();
-}
-
 function closeSettings() {
-  document.getElementById('settingsModal').classList.remove('open');
-}
-
-async function saveSettings() {
-  if (!window.state.runtimeSettings) return;
-
-  const getValue = (id) => document.getElementById(id)?.value || '';
-  
-  const updatedSettings = {
-    ...window.state.runtimeSettings,
-    profile: { displayName: getValue('displayName') || 'Guest' },
-    systemPrompt: getValue('systemPromptText'),
-    apiKeys: {
-      anthropic: getValue('anthropicKey'),
-      gemini: getValue('geminiKey'),
-      openai: getValue('openaiKey'),
-      groq: getValue('groqKey'),
-      mistral: getValue('mistralKey'),
-      cohere: getValue('cohereKey')
-    },
-    external: {
-      github: getValue('githubToken'),
-      notion: getValue('notionKey'),
-      discord: getValue('discordWebhook')
-    },
-    endpoints: {
-      openaiCompatibleBaseUrl: getValue('customBaseUrl'),
-      ollamaBaseUrl: getValue('ollamaBaseUrl')
-    }
-  };
-
-  const saved = await window.db.saveSettings(updatedSettings);
-  window.state.runtimeSettings = saved;
-  showToast('Global settings synchronized', 'success');
-  onModelChange();
+  const modal = document.getElementById('settingsModal');
+  if (modal) modal.classList.remove('open');
 }
 
 /**
@@ -414,34 +374,10 @@ async function openMcpConfigFile() {
 /**
  * UI Utilities
  */
-function toggleKeyVisibility(inputId) {
-  const input = document.getElementById(inputId);
-  if (!input) return;
-  
-  // Find the 'Show/Hide' toggle label next to the input
-  const toggle = input.nextElementSibling;
-  
-  if (input.type === 'password') {
-    input.type = 'text';
-    if (toggle) toggle.textContent = 'Hide';
-  } else {
-    input.type = 'password';
-    if (toggle) toggle.textContent = 'Show';
-  }
-}
-
 function toggleRightPanel() {
   window.state.rightPanelOpen = !window.state.rightPanelOpen;
   document.getElementById('rightPanel').classList.toggle('collapsed', !window.state.rightPanelOpen);
   document.getElementById('panelToggleBtn').classList.toggle('active', window.state.rightPanelOpen);
-}
-
-function switchSettingsPane(pane, el) {
-  document.querySelectorAll('.settings-pane').forEach(p => p.classList.add('hidden'));
-  document.querySelectorAll('.msidebar-item').forEach(i => i.classList.remove('active'));
-  const target = document.getElementById(`pane-${pane}`);
-  if (target) target.classList.remove('hidden');
-  if (el) el.classList.add('active');
 }
 
 function switchPanelTab(tab, el) {
@@ -467,15 +403,37 @@ async function checkConnection() {
 
   // Mapping agent names to provider keys
   const providerMap = {
-    auto: 'gemini', // Auto defaults to gemini
+    auto: 'gemini',
     analyzer: 'gemini',
     reasoner: 'anthropic',
     geminiAgent: 'gemini',
-    local: 'ollama'
+    local: 'ollama',
+    deepseekAgent: 'deepseek',
+    historyTutor: 'openai',
+    mathTutor: 'openai',
+    triage: 'openai',
+    master: 'openai'
   };
 
-  const provider = providerMap[agent];
+  const provider = providerMap[agent] || 'gemini';
   const key = keys[provider];
+
+  // Update model dropdown labels dynamically
+  try {
+    const models = await window.electronAPI.getModels();
+    const providerModels = models[provider] || {};
+    const modelTypeSelect = document.getElementById('modelTypeSelect');
+    if (modelTypeSelect) {
+      const fastOpt = modelTypeSelect.querySelector('option[value="fast"]');
+      const smartOpt = modelTypeSelect.querySelector('option[value="smart"]');
+      const latestOpt = modelTypeSelect.querySelector('option[value="latest"]');
+      if (fastOpt && providerModels.fast) fastOpt.textContent = `Fast (${providerModels.fast})`;
+      if (smartOpt && providerModels.smart) smartOpt.textContent = `Smart (${providerModels.smart})`;
+      if (latestOpt && providerModels.latest) latestOpt.textContent = `Latest (${providerModels.latest})`;
+    }
+  } catch (err) {
+    console.error('Failed to update model labels:', err);
+  }
 
   // Simulated check with actual key validation
   setTimeout(() => {
@@ -491,4 +449,3 @@ async function checkConnection() {
     }
   }, 400);
 }
-
