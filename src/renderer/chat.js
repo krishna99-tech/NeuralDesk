@@ -82,7 +82,7 @@ export class ChatController {
         this._loadPromptHistory();
     }
 
-    sendMessage() {
+    sendMessage(activeTools = []) {
         if (window.streamState.isGenerating) return;
         if (!this.inputEl)                   return;
 
@@ -104,7 +104,7 @@ export class ChatController {
         this._addToPromptHistory(text);
         this.inputEl.value        = '';
         this.inputEl.style.height = 'auto';
-        this.requestAgentResponse(text);
+        this.requestAgentResponse(text, activeTools);
     }
 
     applyDefaultPrompt(promptText) {
@@ -246,6 +246,7 @@ export class ChatController {
 
         const bubble = document.createElement('div');
         bubble.className = `msg-bubble ${isUser ? 'user-msg' : 'ai'}`;
+        if (opts.isError) bubble.classList.add('error-msg');
         if (opts.id) bubble.id = opts.id + '_bubble';
 
         const msgContent = document.createElement('div');
@@ -274,7 +275,7 @@ export class ChatController {
         return msgContent;
     }
 
-    async requestAgentResponse(input) {
+    async requestAgentResponse(input, tools = []) {
         window.streamState.isGenerating = true;
         this.toggleLoading(true);
         this.abortController = new AbortController();
@@ -291,10 +292,16 @@ export class ChatController {
                     agent,
                     modelType:  model,
                     systemHint,
+                    tools,
                     options:    { ...this.options },
                 },
                 { signal: this.abortController.signal },
             );
+
+            if (typeof response === 'string' && response.startsWith('Error')) {
+                this.addMessage('assistant', response, { isError: true });
+                return;
+            }
 
             this.addMessage('assistant', response.text, {
                 model:      response.model,

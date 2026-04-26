@@ -676,11 +676,7 @@ window.deleteChat = async (chatId, event) => {
         if (res.ok) {
             window.appData.chatHistory = window.appData.chatHistory.filter(c => c.id !== chatId);
             if (window.state.currentChatId === chatId) {
-                window.state.currentChatId = null;
-                const msgContainer = document.getElementById('chatMessages');
-                if (msgContainer)
-                    msgContainer.innerHTML = '';
-                document.querySelector('.welcome-screen')?.classList.remove('hidden');
+                window.newChat();
             }
             renderHistory();
             uiController.showToast('Chat deleted', 'success');
