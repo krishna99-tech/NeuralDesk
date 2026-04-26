@@ -1,5 +1,6 @@
 /**
  * NeuralDesk Global State Management
+ * Aligned with the production session architecture.
  */
 window.state = {
   user: null,
@@ -12,7 +13,12 @@ window.state = {
   nodes: [],
   connections: [],
   activeModels: [],
-  runtimeSettings: null
+  runtimeSettings: null,
+  // Session data for the active chat (mirrors backend session store)
+  sessionData: {
+    lastIntent: '',
+    chartData: null
+  }
 };
 
 window.appData = {
@@ -21,7 +27,9 @@ window.appData = {
   chatHistory: [],
   responses: [],
   nodes: [],
-  agentConfig: null
+  agentConfig: null,
+  // Per-chat session cache (keyed by chatId)
+  sessionCache: {}
 };
 
 window.streamState = {

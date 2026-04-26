@@ -7,6 +7,9 @@ const fs = require("fs");
 const { spawn } = require("child_process");
 const McpClientWrapper = require("../mcp/client");
 const { activeClients } = require("../mcp/registry");
+const sessionStore = require("../core/session");
+const { parseIntent } = require("../core/intentParser");
+const { generateData, predictNext } = require("../services/dataService");
 const mcpRuntime = new Map();
 
 function getMcpConfigPath() {
@@ -426,16 +429,15 @@ function getMcpChatExecutionSpec(name, server) {
 // ===== AGENT HANDLERS =====
 ipcMain.handle("ask-ai", async (event, arg1, arg2, arg3) => {
   try {
-    // Resilience logic: Handle both object payload or separate args
-    let input, agent, modelType, tools;
+    // Resilience: handle both object payload or positional args
+    let input, agent, modelType, tools, chatId;
     if (typeof arg1 === "object" && arg1 !== null) {
-      ({ input, agent, modelType, tools } = arg1);
+      ({ input, agent, modelType, tools, chatId } = arg1);
     } else {
       [input, agent, modelType] = [arg1, arg2, arg3];
       tools = [];
     }
 
-    // Default values if missing
     const selectedAgent = agent || "auto";
     const selectedModel = modelType || "fast";
     const selectedTools = Array.isArray(tools)
@@ -443,64 +445,118 @@ ipcMain.handle("ask-ai", async (event, arg1, arg2, arg3) => {
       : [];
     const mcpEnabled = selectedTools.includes("mcp");
 
+    // ── SESSION: get or create session for this chat ──
+    const sessionId = chatId || "default";
+    const session = sessionStore.getSession(sessionId);
+    sessionStore.pushMessage(sessionId, "user", String(input || ""));
+
+    // ── INTENT PARSING ──
+    const { intent } = parseIntent(input);
+    session.lastIntent = intent;
+
+    // ── DATA SERVICE: handle predict/plot intents directly ──
+    if (intent === "predict") {
+      let data = session.data;
+      if (!data.length) data = generateData();
+      const predicted = predictNext(data, 10);
+      const combined = [...data, ...predicted];
+      sessionStore.setData(sessionId, combined);
+      sessionStore.pushMessage(sessionId, "assistant", "Prediction completed.");
+      return {
+        text: "Here is the prediction based on your current data trend.",
+        intent: "predict",
+        chartData: combined,
+        model: "data-service",
+        mcpResults: []
+      };
+    }
+
+    if (intent === "plot") {
+      const data = generateData();
+      sessionStore.setData(sessionId, data);
+      sessionStore.pushMessage(sessionId, "assistant", "Data plotted.");
+      return {
+        text: "Here is your data plotted.",
+        intent: "plot",
+        chartData: data,
+        model: "data-service",
+        mcpResults: []
+      };
+    }
+
+    // ── MCP EXECUTION ──
     let promptInput = String(input || "");
     let mcpResults = [];
     if (mcpEnabled) {
       mcpResults = await executeMcpForPrompt(promptInput);
+      mcpResults.forEach(r => {
+        if (r.ok) sessionStore.cacheMcpResult(sessionId, r.name, r.stdout);
+      });
     }
+
+    // ── CONTEXT INJECTION: inject session history into prompt ──
+    const contextSnapshot = sessionStore.getContextSnapshot(sessionId);
+    const historyContext = contextSnapshot.history.slice(-10)  // last 10 turns
+      .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n");
 
     if (selectedTools.length > 0) {
       const toolLines = [];
       toolLines.push(`Active tools: ${selectedTools.join(", ")}`);
 
-        if (mcpEnabled) {
-          const cfg = readMcpConfig();
-          const serverNames = Object.keys(cfg.mcpServers || {});
-          toolLines.push(
-            serverNames.length > 0
-              ? `Available MCP servers: ${serverNames.join(", ")}`
-              : "Available MCP servers: none configured"
-          );
-          
-          const mcpRegistry = require("../mcp/registry");
-          const allMcpTools = mcpRegistry.getAllTools();
-          if (allMcpTools.length > 0) {
-            toolLines.push("Available MCP Tools (Callable via tool_use):");
-            allMcpTools.forEach(t => {
-              toolLines.push(`- mcp_${t.serverName}_${t.name}: ${t.description || "No description"}`);
-            });
-          }
+      if (mcpEnabled) {
+        const cfg = readMcpConfig();
+        const serverNames = Object.keys(cfg.mcpServers || {});
+        toolLines.push(
+          serverNames.length > 0
+            ? `Available MCP servers: ${serverNames.join(", ")}`
+            : "Available MCP servers: none configured"
+        );
 
-          if (mcpResults.length > 0) {
-            toolLines.push(`MCP execution output:\n${formatMcpResultsForPrompt(mcpResults)}`);
-          } else {
-            toolLines.push("MCP execution output: no servers executed.");
-          }
+        const mcpRegistry = require("../mcp/registry");
+        const allMcpTools = mcpRegistry.getAllTools();
+        if (allMcpTools.length > 0) {
+          toolLines.push("Available MCP Tools (Callable via tool_use):");
+          allMcpTools.forEach(t => {
+            toolLines.push(`- mcp_${t.serverName}_${t.name}: ${t.description || "No description"}`);
+          });
         }
 
-      toolLines.push(
-        "Tool usage guidance: Use only the selected tools when useful. If selected tools cannot directly execute in this app, still answer helpfully and clearly explain assumptions."
-      );
-      promptInput = `${toolLines.join("\n")}\n\nUser request:\n${promptInput}`;
+        if (mcpResults.length > 0) {
+          toolLines.push(`MCP execution output:\n${formatMcpResultsForPrompt(mcpResults)}`);
+        }
+      }
+
+      toolLines.push("Tool usage guidance: Use only the selected tools when useful.");
+
+      if (historyContext) {
+        promptInput = `Conversation History:\n${historyContext}\n\n${toolLines.join("\n")}\n\nUser request:\n${promptInput}`;
+      } else {
+        promptInput = `${toolLines.join("\n")}\n\nUser request:\n${promptInput}`;
+      }
+    } else if (historyContext) {
+      promptInput = `Conversation History:\n${historyContext}\n\nUser request:\n${promptInput}`;
     }
 
+    // ── AI AGENT INVOCATION ──
     const result = (selectedAgent === "auto")
       ? await autoAgent(promptInput, selectedModel)
       : await runAgent(selectedAgent, promptInput, selectedModel);
 
+    sessionStore.pushMessage(sessionId, "assistant", result.text);
+
     const mcpOutputSummary = mcpEnabled ? formatMcpResultsForUser(mcpResults) : "";
-    // Format text summary for internal logs
-    const logOutput = mcpEnabled && mcpOutputSummary 
-      ? `${result.text}\n\nMCP Tool Output:\n${mcpOutputSummary}` 
+    const logOutput = mcpEnabled && mcpOutputSummary
+      ? `${result.text}\n\nMCP Tool Output:\n${mcpOutputSummary}`
       : result.text;
 
-    db.prepare(`
-      INSERT INTO logs (input, output, agent)
-      VALUES (?, ?, ?)
-    `).run(promptInput, logOutput, selectedAgent);
+    db.prepare(`INSERT INTO logs (input, output, agent) VALUES (?, ?, ?)`)
+      .run(promptInput, logOutput, selectedAgent);
 
     return {
       text: result.text,
+      intent,
+      chartData: session.data.length ? session.data : null,
       mcpResults: mcpEnabled ? mcpResults : [],
       model: result.model
     };

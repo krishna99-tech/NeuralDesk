@@ -425,7 +425,8 @@ async function requestAgentResponse() {
       input, 
       agent, 
       modelType,
-      tools
+      tools,
+      chatId: window.state.currentChatId  // Pass chat ID for session continuity
     });
 
     if (isStale()) {
@@ -445,6 +446,12 @@ async function requestAgentResponse() {
       if (response.mcpResults && response.mcpResults.length > 0) {
         renderMcpVisualization(el.parentElement, response.mcpResults);
       }
+
+      // Render chart data if returned by data service (predict/plot intents)
+      if (response.chartData && Array.isArray(response.chartData) && response.chartData.length > 0) {
+        renderInlineChart(el.parentElement.parentElement, response.chartData, response.intent);
+      }
+
       window.state.messages.push({ 
         role: 'assistant', 
         content: response.text, 
@@ -584,4 +591,81 @@ function newChat() {
 function quickPrompt(text) {
   document.getElementById('chatInput').value = text;
   sendMessage();
+}
+
+/**
+ * Render an inline Chart.js chart directly inside the chat message row.
+ * Handles historical + predicted (flagged) data series.
+ */
+function renderInlineChart(container, data, intent) {
+  if (!window.Chart || !Array.isArray(data)) return;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'inline-chart-wrapper';
+  wrapper.style.cssText = `
+    margin-top: 16px; padding: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+  `;
+
+  const label = document.createElement('div');
+  label.style.cssText = 'font-size:11px; color:var(--text3); font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px;';
+  label.textContent = intent === 'predict' ? '📈 Prediction Chart' : '📊 Data Chart';
+  wrapper.appendChild(label);
+
+  const canvasWrapper = document.createElement('div');
+  canvasWrapper.style.cssText = 'height: 220px; position: relative;';
+  const canvas = document.createElement('canvas');
+  canvasWrapper.appendChild(canvas);
+  wrapper.appendChild(canvasWrapper);
+  container.appendChild(wrapper);
+
+  const historical = data.filter(d => !d.predicted);
+  const predicted  = data.filter(d => d.predicted);
+
+  new window.Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: data.map(d => `T${d.time}`),
+      datasets: [
+        {
+          label: 'Data',
+          data: historical.map(d => d.value),
+          borderColor: '#7c6aff',
+          backgroundColor: 'rgba(124, 106, 255, 0.15)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 3
+        },
+        ...(predicted.length > 0 ? [{
+          label: 'Predicted',
+          data: [
+            ...new Array(historical.length - 1).fill(null),
+            historical[historical.length - 1]?.value,
+            ...predicted.map(d => d.value)
+          ],
+          borderColor: '#f59e0b',
+          backgroundColor: 'rgba(245,158,11,0.1)',
+          borderDash: [5, 5],
+          borderWidth: 2,
+          fill: false,
+          tension: 0.4,
+          pointRadius: 3
+        }] : [])
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#aaa', font: { size: 11 } } }
+      },
+      scales: {
+        x: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+        y: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
+      }
+    }
+  });
 }
