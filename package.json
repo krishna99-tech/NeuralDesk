@@ -8,16 +8,47 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "postinstall": "electron-builder install-app-deps",
+    "gen-icon": "node generate-icon.js",
     "clean": "node -e \"const fs=require('fs'); ['dist','dist-test','dist-stream'].forEach(d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch(e){if(e.code!=='EBUSY') throw e; console.warn('skip busy dir:', d)}})\"",
-    "dist": "electron-packager . NeuralDesk --platform=win32 --arch=x64 --asar --overwrite --out=dist --prune=true --ignore=\"^/dist\" --ignore=\"^/\\.git$\"",
-    "dist:unpacked": "electron-packager . NeuralDesk --platform=win32 --arch=x64 --overwrite --out=dist --prune=true --ignore=\"^/dist\" --ignore=\"^/\\.git$\"",
-    "dist:prod": "npm run clean && npm run dist",
+    "dist": "electron-builder --win portable",
+    "dist:unpacked": "electron-builder --win dir",
+    "dist:prod": "npm run build",
     "build": "npm run clean && npm run dist"
   },
   "devDependencies": {
-    "@electron/packager": "^18.3.6",
-    "electron": "^36.0.0",
-    "electron-rebuild": "^3.2.9"
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1",
+    "png-to-ico": "^2.1.8",
+    "sharp": "^0.33.5"
+  },
+  "build": {
+    "appId": "com.neuraldesk.app",
+    "productName": "NeuralDesk",
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "assets/icon.ico",
+      "verifyUpdateCodeSignature": false,
+      "forceCodeSigning": false
+    },
+    "portable": {
+      "artifactName": "${productName}_Portable_${version}.${ext}",
+      "requestExecutionLevel": "user",
+      "unpackDirName": "NeuralDesk_Temp",
+      "splashImage": null,
+      "unicode": true
+    },
+    "asar": true,
+    "compression": "maximum",
+    "files": [
+      "**/*",
+      "!dist",
+      "assets/**/*",
+      "document/**/*",
+      "data/**/*"
+    ]
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

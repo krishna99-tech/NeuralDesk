@@ -1,5 +1,7 @@
 const { app, BrowserWindow, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
+const { exec } = require("child_process");
 
 // Environment
 const isDev = !app.isPackaged;
