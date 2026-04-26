@@ -76,7 +76,12 @@ function addMessage(role, content, opts = {}) {
   const msgContent = document.createElement('div');
   if (opts.id) msgContent.id = opts.id;
   if (opts.streaming) msgContent.className = 'streaming-cursor';
-  msgContent.textContent = content;
+  
+  if (window.renderer) {
+    window.renderer.render(content, msgContent);
+  } else {
+    msgContent.textContent = content;
+  }
   
   bubble.appendChild(msgContent);
 

@@ -17,10 +17,13 @@
     "build": "npm run clean && npm run dist"
   },
   "devDependencies": {
+    "@types/axios": "^0.9.36",
+    "@types/node": "^25.6.0",
     "electron": "^41.3.0",
     "electron-builder": "^26.8.1",
     "png-to-ico": "^2.1.8",
-    "sharp": "^0.33.5"
+    "sharp": "^0.33.5",
+    "typescript": "^6.0.3"
   },
   "build": {
     "appId": "com.neuraldesk.app",
@@ -52,6 +55,7 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@openai/agents": "^0.8.5",
     "axios": "^1.15.2",
     "better-sqlite3": "^12.9.0",

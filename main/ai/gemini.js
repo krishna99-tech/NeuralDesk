@@ -1,21 +1,50 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-module.exports = async ({ prompt, model, apiKey, systemPrompt, temperature, maxTokens }) => {
+module.exports = async ({ prompt, model, apiKey, systemPrompt, temperature, maxTokens, tools }) => {
   if (!apiKey) throw new Error("Google Gemini API Key is missing. Please configure it in Settings.");
   const genAI = new GoogleGenerativeAI(apiKey);
   const requestedModel = model || "gemini-2.5-flash";
 
   try {
-    const m = genAI.getGenerativeModel({ 
+    const modelOptions = { 
       model: requestedModel,
       systemInstruction: systemPrompt || undefined,
       generationConfig: {
         temperature: temperature ?? 0.7,
         maxOutputTokens: maxTokens ?? 2048
       }
-    });
-    const res = await m.generateContent(prompt);
-    return { text: res.response.text() };
+    };
+
+    // Convert tools to Gemini format
+    if (Array.isArray(tools) && tools.length > 0) {
+      modelOptions.tools = [{
+        functionDeclarations: tools.map(t => ({
+          name: t.name,
+          description: t.description,
+          parameters: sanitizeSchema(t.parameters)
+        }))
+      }];
+    }
+
+    const m = genAI.getGenerativeModel(modelOptions);
+    const result = await m.generateContent(prompt);
+    const response = result.response;
+    const call = response.candidates[0].content.parts.find(p => p.functionCall);
+
+    if (call) {
+      return { 
+        text: "", 
+        toolCalls: [{
+          id: `call_${Date.now()}`,
+          function: {
+            name: call.functionCall.name,
+            arguments: JSON.stringify(call.functionCall.args)
+          }
+        }]
+      };
+    }
+
+    return { text: response.text() };
   } catch (err) {
     const rawMessage = String(err?.message || "");
     const lowerMessage = rawMessage.toLowerCase();
@@ -51,3 +80,27 @@ module.exports = async ({ prompt, model, apiKey, systemPrompt, temperature, maxT
     throw err;
   }
 };
+
+/**
+ * Sanitizes JSON Schema for Gemini's strict requirements.
+ */
+function sanitizeSchema(schema) {
+  if (!schema || typeof schema !== "object") return schema;
+  
+  const res = Array.isArray(schema) ? [] : {};
+  
+  for (const key in schema) {
+    // Remove unsupported fields
+    if (key === "additionalProperties") continue;
+    if (key === "default" && typeof schema[key] === "undefined") continue;
+
+    const val = schema[key];
+    if (typeof val === "object" && val !== null) {
+      res[key] = sanitizeSchema(val);
+    } else {
+      res[key] = val;
+    }
+  }
+  
+  return res;
+}

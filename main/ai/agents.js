@@ -1,7 +1,27 @@
 const callAI = require("./router");
 const MODELS = require("./models");
-const { Agent, tool } = require("@openai/agents");
+const { Agent, run, tool } = require("@openai/agents");
 const { z } = require("zod");
+const mcpRegistry = require("../mcp/registry");
+
+/**
+ * Dynamically converts MCP tools into OpenAI-compatible tools
+ */
+function getMcpAgentTools() {
+  const mcpTools = mcpRegistry.getAllTools();
+  return mcpTools.map(t => {
+    return {
+      name: `mcp_${t.serverName}_${t.name}`,
+      description: `[From ${t.serverName}] ${t.description || "Execute an MCP tool"}`,
+      parameters: t.inputSchema || { type: "object", properties: {} },
+      execute: async (args) => {
+        console.log(`[Agent] Calling MCP tool: ${t.name} on ${t.serverName}`);
+        const result = await mcpRegistry.callTool(t.serverName, t.name, args);
+        return JSON.stringify(result.content);
+      }
+    };
+  });
+}
 
 const agents = {
   analyzer: {
@@ -87,6 +107,16 @@ Your goal is to satisfy the user request by:
 2. Using tools to acquire information or perform actions.
 3. Handing off to specialist agents when their expertise is needed.
 
+PRESENTATION RULES:
+- If you receive data (like from MongoDB), ALWAYS format it as a beautiful Markdown Table.
+- For visualizations and UI, use the Artifact system:
+  - Use \`\`\`artifact:chart\`\`\` for data graphs.
+  - Use \`\`\`artifact:html\`\`\` for complex UI components or interactive layouts.
+  - Use \`\`\`artifact:svg\`\`\` for custom diagrams or graphics.
+  - Use \`\`\`artifact:code\`\`\` for scripts or code snippets.
+- ALWAYS give each artifact a descriptive title: \`\`\`artifact:type title="Your Title"\`\`\`
+- NEVER dump raw JSON to the user. Always summarize and format it.
+
 Specialists:
 - historyTutor: Deep knowledge of history and ancient civilizations.
 - mathTutor: Mathematical problem solving and explanations.
@@ -164,11 +194,13 @@ async function runAgent(name, input, overrideType) {
           })
         : [];
 
+      const mcpTools = getMcpAgentTools();
+
       const sdkAgent = new Agent({
         name: agentConfig.name || agentName,
         instructions: agentConfig.instructions || settings.systemPrompt,
         model: model,
-        tools: agentConfig.tools || [],
+        tools: [...(agentConfig.tools || []), ...mcpTools],
         handoffs: handoffs
       });
 
@@ -180,12 +212,54 @@ async function runAgent(name, input, overrideType) {
       };
     }
     
-    return {
-      text: (await callAI({
+    // UNIVERSAL TOOL LOOP (For non-SDK providers like Gemini, Claude, etc.)
+    const mcpTools = getMcpAgentTools();
+    let currentInput = typeof agentConfig.prompt === "function" ? agentConfig.prompt(input) : (agentConfig.instructions ? agentConfig.instructions + "\n\n" : "") + input;
+    let iterations = 0;
+    const maxIterations = 5;
+
+    while (iterations < maxIterations) {
+      const response = await callAI({
         provider,
         model,
-        prompt: typeof agentConfig.prompt === "function" ? agentConfig.prompt(input) : (agentConfig.instructions ? agentConfig.instructions + "\n\n" : "") + input
-      })).text,
+        prompt: currentInput,
+        tools: mcpTools
+      });
+
+      if (response.toolCalls && response.toolCalls.length > 0) {
+        console.log(`[Agent] ${provider} requested ${response.toolCalls.length} tool calls...`);
+        let toolResults = [];
+        
+        for (const call of response.toolCalls) {
+          const toolName = call.function.name;
+          const toolArgs = JSON.parse(call.function.arguments || "{}");
+          const targetTool = mcpTools.find(t => t.name === toolName);
+          
+          if (targetTool) {
+            try {
+              const result = await targetTool.execute(toolArgs);
+              toolResults.push(`Tool ${toolName} output: ${result}`);
+            } catch (err) {
+              toolResults.push(`Tool ${toolName} failed: ${err.message}`);
+            }
+          } else {
+            toolResults.push(`Tool ${toolName} not found.`);
+          }
+        }
+        
+        // Append results to prompt for next iteration
+        currentInput += `\n\nTool Results:\n${toolResults.join("\n")}\n\nPlease proceed based on this data.`;
+        iterations++;
+      } else {
+        return {
+          text: response.text,
+          model
+        };
+      }
+    }
+
+    return {
+      text: "Error: Maximum tool execution iterations reached without a final answer.",
       model
     };
   };

@@ -321,18 +321,26 @@ async function addMcpServerFromForm() {
   const command = document.getElementById('mcpServerCommand')?.value.trim() || '';
   const rawArgs = document.getElementById('mcpServerArgs')?.value || '';
   const rawEnv = document.getElementById('mcpServerEnv')?.value || '';
+  const chatCommand = document.getElementById('mcpChatCommand')?.value.trim() || '';
+  const rawChatArgs = document.getElementById('mcpChatArgs')?.value || '';
 
   if (!name) return showToast('MCP server name is required', 'error');
   if (!command) return showToast('MCP command is required', 'error');
 
   const args = rawArgs.split(',').map(v => v.trim()).filter(Boolean);
   const env = parseMcpEnv(rawEnv);
+  
   if (rawEnv.trim() && Object.keys(env).length === 0) {
     return showToast('Invalid env format. Use KEY=VALUE or JSON object format.', 'error');
   }
 
   try {
-    await window.electronAPI.addMcpServer({ name, command, args, env });
+    await window.electronAPI.addMcpServer({ 
+      name, 
+      command, 
+      args, 
+      env
+    });
     showToast(`MCP server '${name}' added`, 'success');
     const reset = (id) => {
       const el = document.getElementById(id);

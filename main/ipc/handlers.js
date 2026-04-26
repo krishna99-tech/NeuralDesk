@@ -5,6 +5,8 @@ const MODELS = require("../ai/models");
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
+const McpClientWrapper = require("../mcp/client");
+const { activeClients } = require("../mcp/registry");
 const mcpRuntime = new Map();
 
 function getMcpConfigPath() {
@@ -152,9 +154,17 @@ function startMcpServer(name, server) {
     child.on("close", (code) => {
       runtime.lastExitCode = code;
       runtime.status = code === 0 ? "stopped" : "error";
+      activeClients.delete(name);
       logStream.write(`[${new Date().toISOString()}] closed exitCode=${code}\n`);
       logStream.end();
     });
+
+    // Initialize persistent client for tool access
+    const mcpClient = new McpClientWrapper(name, command, args, env);
+    mcpClient.connect().then(ok => {
+      if (ok) activeClients.set(name, mcpClient);
+    });
+
   } catch (err) {
     runtime.status = "error";
     runtime.lastError = String(err?.message || "Failed to spawn MCP server.");
@@ -222,7 +232,13 @@ function executeMcpServer({ name, command, args, env, prompt, timeoutMs = 45000 
     logStream.write(`[${startedAt}] MCP execution start\n`);
     logStream.write(`server=${name}\ncommand=${command}\nargs=${JSON.stringify(Array.isArray(args) ? args : [])}\ntimeoutMs=${timeoutMs}\n`);
 
-    const child = spawn(command, Array.isArray(args) ? args : [], {
+    const processedArgs = (Array.isArray(args) ? args : []).map(arg => 
+      String(arg)
+        .replace(/{{query}}/g, String(prompt || ""))
+        .replace(/{{prompt}}/g, String(prompt || ""))
+    );
+
+    const child = spawn(command, processedArgs, {
       shell: false,
       windowsHide: true,
       env: {
@@ -308,17 +324,20 @@ async function executeMcpForPrompt(prompt) {
     if (spec.mode === "server") {
       startMcpServer(name, server);
       const running = mcpRuntime.get(name);
+      const isActive = running?.status === "running";
       results.push({
         name,
-        ok: false,
+        ok: isActive,
         exitCode: running?.lastExitCode ?? null,
         timedOut: false,
         durationMs: 0,
-        stdout: running?.status === "running"
-          ? `MCP server '${name}' is running (pid=${running?.process?.pid || "n/a"}).`
-          : `MCP server '${name}' status is '${running?.status || "off"}'.`,
-        stderr: "Server-mode MCP cannot provide one-shot chat data by itself. Configure chatCommand/chatArgs for data extraction.",
-        logPath: running.startupLogPath || ""
+        stdout: isActive
+          ? `MCP server '${name}' is connected and ready.`
+          : `MCP server '${name}' is ${running?.status || "off"}.`,
+        stderr: isActive 
+          ? "Interactive tools are available. The agent can call these tools dynamically during the conversation."
+          : (running?.lastError || "Server is not running."),
+        logPath: running?.startupLogPath || ""
       });
       continue;
     }
@@ -434,20 +453,30 @@ ipcMain.handle("ask-ai", async (event, arg1, arg2, arg3) => {
       const toolLines = [];
       toolLines.push(`Active tools: ${selectedTools.join(", ")}`);
 
-      if (mcpEnabled) {
-        const cfg = readMcpConfig();
-        const serverNames = Object.keys(cfg.mcpServers || {});
-        toolLines.push(
-          serverNames.length > 0
-            ? `Available MCP servers: ${serverNames.join(", ")}`
-            : "Available MCP servers: none configured"
-        );
-        if (mcpResults.length > 0) {
-          toolLines.push(`MCP execution output:\n${formatMcpResultsForPrompt(mcpResults)}`);
-        } else {
-          toolLines.push("MCP execution output: no servers executed.");
+        if (mcpEnabled) {
+          const cfg = readMcpConfig();
+          const serverNames = Object.keys(cfg.mcpServers || {});
+          toolLines.push(
+            serverNames.length > 0
+              ? `Available MCP servers: ${serverNames.join(", ")}`
+              : "Available MCP servers: none configured"
+          );
+          
+          const mcpRegistry = require("../mcp/registry");
+          const allMcpTools = mcpRegistry.getAllTools();
+          if (allMcpTools.length > 0) {
+            toolLines.push("Available MCP Tools (Callable via tool_use):");
+            allMcpTools.forEach(t => {
+              toolLines.push(`- mcp_${t.serverName}_${t.name}: ${t.description || "No description"}`);
+            });
+          }
+
+          if (mcpResults.length > 0) {
+            toolLines.push(`MCP execution output:\n${formatMcpResultsForPrompt(mcpResults)}`);
+          } else {
+            toolLines.push("MCP execution output: no servers executed.");
+          }
         }
-      }
 
       toolLines.push(
         "Tool usage guidance: Use only the selected tools when useful. If selected tools cannot directly execute in this app, still answer helpfully and clearly explain assumptions."
@@ -605,7 +634,11 @@ ipcMain.handle("add-mcp-server", async (_, server) => {
     args: Array.isArray(server?.args)
       ? server.args.map(v => String(v).trim()).filter(Boolean)
       : [],
-    env: server?.env && typeof server.env === "object" ? server.env : {}
+    env: server?.env && typeof server.env === "object" ? server.env : {},
+    chatCommand: String(server?.chatCommand || "").trim(),
+    chatArgs: Array.isArray(server?.chatArgs)
+      ? server.chatArgs.map(v => String(v).trim()).filter(Boolean)
+      : []
   };
   const saved = writeMcpConfig(config);
   startMcpServer(name, saved.mcpServers[name]);
