@@ -130,7 +130,11 @@ You can customize:
 
 ## Runtime Data Storage
 
-The app stores local runtime files in Electron `userData` directory:
+The app stores local runtime files in the Electron `userData` directory.
+
+**Note on Portability:** 
+- If running the **Portable Version**, `userData` is redirected to a hidden folder named `NeuralDesk_Data` in the same directory as the executable.
+- Otherwise, files are stored in `%APPDATA%/neuraldesk-desktop`.
 
 - `app_settings.json` (profile, theme, keys, selected model, endpoints)
 - `mcp_config.json` (MCP server entries)
@@ -155,4 +159,3 @@ The app stores local runtime files in Electron `userData` directory:
 
 - **Build EBUSY lock error**
   - Close running packaged app instances and rebuild.
-

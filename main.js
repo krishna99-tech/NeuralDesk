@@ -6,6 +6,19 @@ const { exec } = require("child_process");
 // Environment
 const isDev = !app.isPackaged;
 
+// Portable Mode Support: Save data in the app directory instead of %APPDATA%
+if (process.env.PORTABLE_EXECUTABLE_DIR) {
+  const portableDataPath = path.join(process.env.PORTABLE_EXECUTABLE_DIR, "NeuralDesk_Data");
+  if (!fs.existsSync(portableDataPath)) {
+    fs.mkdirSync(portableDataPath, { recursive: true });
+    if (process.platform === "win32") {
+      exec(`attrib +h "${portableDataPath}"`);
+    }
+  }
+  app.setPath("userData", portableDataPath);
+  app.setPath("sessionData", path.join(portableDataPath, "SessionData"));
+}
+
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1440,

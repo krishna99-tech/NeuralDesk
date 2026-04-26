@@ -1,63 +1,22 @@
 # NeuralDesk Desktop
 
-NeuralDesk is an Electron-based desktop AI client with:
+NeuralDesk is a powerful, portable desktop AI client designed for seamless interaction with various AI models and local tools.
 
-- Multi-provider model support (Gemini, Anthropic, OpenAI-compatible, Ollama)
-- Streaming responses with stop/cancel generation
-- Local desktop settings and API key storage
-- MCP server configuration from UI
-- Config-driven UI sections via JSON files
+Key Highlights:
+
+- **Multi-Provider AI**: Connects to Gemini, Anthropic, OpenAI-compatible, and Ollama models.
+- **Real-time Interaction**: Enjoy streaming responses with the ability to stop or cancel generation.
+- **True Portability**: Run the application from any location (e.g., USB drive) with all your data (settings, chats, configurations) self-contained and "roaming" with the executable.
+- **Local Tool Integration (MCP)**: Configure and execute custom scripts or applications directly from the UI to enhance AI capabilities with local data analysis or automation.
 
 ## Features
 
-- **Desktop app** built with Electron
-- **Model routing** by selected model in dropdown
-- **Gemini/OpenAI/Ollama integration** for real chat responses
-- **Connection status badge** for selected model
+- **Zero-Installation Portable Executable**: Simply run the `.exe` file; no setup required.
+- **Dynamic Model Selection**: Easily switch between different AI models using a dropdown.
+- **Intelligent Chat Responses**: Leverage Gemini, OpenAI, and Ollama for rich, contextual conversations.
+- **Real-time Connection Status**: Monitor the connection health of your selected AI model.
 - **MCP management**
-  - Add MCP servers from Settings UI
-  - Remove MCP servers from Settings UI
-  - View MCP servers in right-side MCP panel
-  - Execute configured MCP commands from chat when `MCP` tool is selected
-  - Open and edit local MCP config JSON
-- **Agent/Config data split** into `data/*.json`
-
-## Project Structure
-
-- `index.html` - Main UI and renderer logic
-- `main.js` - Electron main process, secure IPC, LLM calls
-- `preload.js` - Safe renderer API bridge
-
-## Prerequisites
-
-- Node.js 18+ (Node 20+ recommended)
-- npm
-- Windows (current scripts/package target `win32 x64`)
-
-## Install
-
-```bash
-npm install
-```
-
-## Run in Development
-
-```bash
-npm start
-```
-
-or
-
-```bash
-npm run dev
-```
-
-## Build Production Package
-
-```bash
-npm run dist:prod
-```
-
-Output:
-
-- `dist/NeuralDesk-win32-x64`
+  - **Effortless Configuration**: Add and remove MCP (Multi-Command Processor) servers directly from the Settings UI.
+  - **Integrated Control**: View active MCP servers in a dedicated panel.
+  - **AI-Powered Execution**: Trigger configured MCP commands from your chat prompts when the `MCP` tool is active, enabling AI to interact with local tools and data.
+  - **Advanced Customization**: Directly open and edit the underlying `mcp_config.json` for fine-grained control.
