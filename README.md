@@ -20,3 +20,39 @@ Key Highlights:
   - **Integrated Control**: View active MCP servers in a dedicated panel.
   - **AI-Powered Execution**: Trigger configured MCP commands from your chat prompts when the `MCP` tool is active, enabling AI to interact with local tools and data.
   - **Advanced Customization**: Directly open and edit the underlying `mcp_config.json` for fine-grained control.
+
+## Development
+
+- `npm.cmd run dev`: Start the Electron desktop app in JavaScript mode.
+- `npm.cmd run start`: Start the Electron desktop app.
+- `npm.cmd run dist`: Build a portable Windows package.
+
+## Project Structure
+
+```text
+.
+├─ assets/
+├─ src/
+│  ├─ main/
+│  │  ├─ ai/
+│  │  ├─ core/
+│  │  ├─ db/
+│  │  ├─ ipc/
+│  │  ├─ mcp/
+│  │  ├─ services/
+│  │  ├─ main.js
+│  │  └─ preload.js
+│  └─ renderer/
+│     ├─ css/
+│     ├─ auth.js
+│     ├─ chat.js
+│     ├─ index.js
+│     ├─ router.js
+│     ├─ settings.js
+│     ├─ toolUI.js
+│     ├─ types.js
+│     └─ ui.js
+├─ index.html
+├─ package.json
+└─ README.md
+```

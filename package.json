@@ -2,28 +2,25 @@
   "name": "neuraldesk-desktop",
   "version": "1.0.0",
   "description": "NeuralDesk desktop application built with Electron.",
-  "main": "main.js",
+  "main": "src/main/main.js",
   "author": "vakav",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "watch": "npm run dev",
     "postinstall": "electron-builder install-app-deps",
     "gen-icon": "node generate-icon.js",
     "clean": "node -e \"const fs=require('fs'); ['dist','dist-test','dist-stream'].forEach(d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch(e){if(e.code!=='EBUSY') throw e; console.warn('skip busy dir:', d)}})\"",
     "dist": "electron-builder --win portable",
     "dist:unpacked": "electron-builder --win dir",
-    "dist:prod": "npm run build",
-    "build": "npm run clean && npm run dist"
+    "dist:prod": "npm run clean && npm run dist"
   },
   "devDependencies": {
-    "@types/axios": "^0.9.36",
-    "@types/node": "^25.6.0",
     "electron": "^41.3.0",
     "electron-builder": "^26.8.1",
     "png-to-ico": "^2.1.8",
-    "sharp": "^0.33.5",
-    "typescript": "^6.0.3"
+    "sharp": "^0.33.5"
   },
   "build": {
     "appId": "com.neuraldesk.app",
@@ -44,13 +41,18 @@
       "unicode": true
     },
     "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
     "compression": "maximum",
+    "directories": {
+      "output": "release"
+    },
     "files": [
-      "**/*",
-      "!dist",
+      "src/**/*.js",
+      "index.html",
       "assets/**/*",
-      "document/**/*",
-      "data/**/*"
+      "package.json"
     ]
   },
   "dependencies": {
