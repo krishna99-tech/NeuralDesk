@@ -24,7 +24,7 @@
   },
   "build": {
     "appId": "com.neuraldesk.app",
-    "productName": "NeuralDesk",
+    "productName": "neuraldesk-desktop",
     "win": {
       "target": [
         "portable"
@@ -32,7 +32,7 @@
       "icon": "assets/icon.ico"
     },
     "portable": {
-      "artifactName": "${productName}_Portable_${version}.${ext}",
+      "artifactName": "${productName}.${ext}",
       "requestExecutionLevel": "user",
       "unpackDirName": "NeuralDesk_Temp",
       "unicode": true

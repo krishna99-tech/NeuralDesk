@@ -39,18 +39,16 @@ const fs = __importStar(require("fs"));
 const child_process_1 = require("child_process");
 const isDev = !electron_1.app.isPackaged;
 electron_1.app.name = "neuraldesk-desktop";
-// Portable Mode Support
-if (process.env.PORTABLE_EXECUTABLE_DIR) {
-    const portableDataPath = path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'NeuralDesk_Data');
-    if (!fs.existsSync(portableDataPath)) {
-        fs.mkdirSync(portableDataPath, { recursive: true });
-        if (process.platform === 'win32') {
-            (0, child_process_1.exec)(`attrib +h "${portableDataPath}"`);
-        }
-    }
-    electron_1.app.setPath('userData', portableDataPath);
-    electron_1.app.setPath('sessionData', path.join(portableDataPath, 'SessionData'));
+// Data is stored in AppData/Roaming/neuraldesk-desktop
+const userDataPath = path.join(electron_1.app.getPath('appData'), 'neuraldesk-desktop');
+electron_1.app.setPath('userData', userDataPath);
+electron_1.app.setPath('sessionData', path.join(userDataPath, 'SessionData'));
+if (!fs.existsSync(userDataPath)) {
+    fs.mkdirSync(userDataPath, { recursive: true });
 }
+
+
+
 function createWindow() {
     const mainWindow = new electron_1.BrowserWindow({
         width: 1200,

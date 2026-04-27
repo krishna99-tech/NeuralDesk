@@ -468,7 +468,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (settings)
             window.appData.settings = settings;
         applySettingsToUI(window.appData.settings);
-        await window.checkConnection();
         await loadMcpConfigIntoUI();
         // Initial Render
         updateUIFromState();
@@ -657,11 +656,18 @@ window.loadChat = (id) => {
     if (chat) {
         window.state.currentChatId = id;
         window.state.messages = [...chat.messages];
-        // Re-render messages
+        
         const container = document.getElementById('chatMessages');
         if (container) {
             container.innerHTML = '';
-            chat.messages.forEach(m => chatController.addMessage(m.role, m.content ?? ''));
+            // Optimization: Create messages without scrolling or highlighting each time
+            chat.messages.forEach(m => {
+                chatController.addMessage(m.role, m.content ?? '', { skipScroll: true, skipHighlight: true });
+            });
+            
+            // Final scroll and highlight pass
+            container.scrollTop = container.scrollHeight;
+            if (window.Prism) window.Prism.highlightAllUnder(container);
         }
         renderHistory();
     }

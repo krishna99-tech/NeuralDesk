@@ -74,17 +74,18 @@ export class UIController {
             setTimeout(() => toast.remove(), 300);
         }, 3000);
     }
-    renderMarkdown(content, container) {
+    renderMarkdown(content, container, opts = {}) {
         const safeContent = content ?? '';
         if (window.marked && container) {
             container.innerHTML = window.marked.parse(safeContent);
-            if (window.Prism)
+            if (window.Prism && !opts.skipHighlight)
                 window.Prism.highlightAllUnder(container);
         }
         else if (container) {
             container.textContent = safeContent;
         }
     }
+
     autoResize(textarea) {
         textarea.style.height = 'auto';
         textarea.style.height = textarea.scrollHeight + 'px';

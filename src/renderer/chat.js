@@ -254,7 +254,7 @@ export class ChatController {
         if (opts.streaming) msgContent.className = 'streaming-cursor';
 
         if (window.renderer) {
-            window.renderer.render(content, msgContent);
+            window.renderer.render(content, msgContent, { skipHighlight: opts.skipHighlight });
         } else {
             msgContent.textContent = content;
         }
@@ -271,8 +271,11 @@ export class ChatController {
         }
 
         this.messagesContainer.appendChild(row);
-        this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        if (!opts.skipScroll) {
+            this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        }
         return msgContent;
+
     }
 
     async requestAgentResponse(input, tools = []) {
