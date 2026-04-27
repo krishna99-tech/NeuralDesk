@@ -29,15 +29,12 @@
       "target": [
         "portable"
       ],
-      "icon": "assets/icon.ico",
-      "verifyUpdateCodeSignature": false,
-      "forceCodeSigning": false
+      "icon": "assets/icon.ico"
     },
     "portable": {
       "artifactName": "${productName}_Portable_${version}.${ext}",
       "requestExecutionLevel": "user",
       "unpackDirName": "NeuralDesk_Temp",
-      "splashImage": null,
       "unicode": true
     },
     "asar": true,
@@ -49,7 +46,7 @@
       "output": "release"
     },
     "files": [
-      "src/**/*.js",
+      "src/**/*",
       "index.html",
       "assets/**/*",
       "package.json"

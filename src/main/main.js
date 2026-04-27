@@ -64,7 +64,18 @@ function createWindow() {
             devTools: isDev
         }
     });
-    mainWindow.loadFile(path.join(__dirname, '../../index.html'));
+    const indexPath = path.join(__dirname, '../../index.html');
+    mainWindow.loadFile(indexPath);
+
+    // Optional: Open DevTools in development to help debug rendering issues
+    if (isDev) {
+        mainWindow.webContents.openDevTools();
+    }
+
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+        console.error('Failed to load:', errorCode, errorDescription);
+    });
+
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
         electron_1.shell.openExternal(url);
         return { action: 'deny' };

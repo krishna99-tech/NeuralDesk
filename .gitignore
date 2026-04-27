@@ -9,6 +9,7 @@ build/
 *.exe
 *.dmg
 *.AppImage
+release/
 
 # Logs
 logs/
