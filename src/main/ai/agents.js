@@ -45,7 +45,10 @@ const agents_1 = require("@openai/agents");
 const zod_1 = require("zod");
 const mcpRegistry = __importStar(require("../mcp/registry"));
 const fs = __importStar(require("fs"));
+const axios_1 = __importDefault(require("axios"));
 const sqlite_1 = __importDefault(require("../db/sqlite"));
+const langchain_1 = require("../ipc/langchain");
+const { logAppEvent, truncateText } = require("../logger");
 /**
  * Dynamically converts MCP tools into OpenAI-compatible tools
  */
@@ -94,7 +97,7 @@ function getMcpAgentTools() {
             description: `[From ${t.serverName}] ${t.description || "Execute an MCP tool"}`,
             parameters: jsonSchemaToZod(t.inputSchema),
             execute: async (args) => {
-                console.log(`[Agent] Calling MCP tool: ${t.name} on ${t.serverName}`);
+                logAppEvent("INFO", "Agents", "MCP_TOOL_CALL", `Calling MCP tool: ${t.name}`, { server: t.serverName, args });
                 const result = await mcpRegistry.callTool(t.serverName, t.name, args);
                 return JSON.stringify(result.content);
             }
@@ -139,7 +142,7 @@ ${i}`
         modelType: "smart",
         sdkAgent: true,
         name: "History tutor",
-        instructions: "You answer history questions clearly and concisely. Use history_fun_fact when it helps.",
+        instructions: "You answer history questions clearly and concisely. Use 'history_fun_fact' for trivia or 'fetch_on_this_day' to get real events from a specific date.",
         tools: [
             (0, agents_1.tool)({
                 name: "history_fun_fact",
@@ -148,6 +151,26 @@ ${i}`
                 async execute() {
                     return "Sharks are older than trees.";
                 },
+            }),
+            (0, agents_1.tool)({
+                name: "fetch_on_this_day",
+                description: "Fetches historical events for a specific month and day from Wikimedia.",
+                parameters: zod_1.z.object({
+                    month: zod_1.z.number().min(1).max(12).describe("Month (1-12)"),
+                    day: zod_1.z.number().min(1).max(31).describe("Day (1-31)")
+                }),
+                async execute({ month, day }) {
+                    try {
+                        const m = String(month).padStart(2, '0');
+                        const d = String(day).padStart(2, '0');
+                        const url = `https://en.wikipedia.org/api/rest_v1/feed/onthisday/all/${m}/${d}`;
+                        const response = await axios_1.default.get(url);
+                        const events = response.data.selected || [];
+                        return events.slice(0, 5).map(e => `[Year ${e.year}] ${e.text}`).join("\n");
+                    } catch (err) {
+                        return "Error fetching live history data: " + err.message;
+                    }
+                }
             })
         ]
     },
@@ -212,7 +235,15 @@ Always strive for the most accurate and helpful response.`,
                     }
                 }
             })
-        ]
+        ],
+    },
+    aipipeAgent: {
+        provider: "aipipe",
+        modelType: "fast", // Assuming gpt-5-nano is fast
+        prompt: (i) => `You are a helpful assistant powered by AIpipe's OpenAI/GPT-5 Nano model. Answer the user's request directly in clear, concise language.
+User request:
+${i}`
+        
     }
 };
 function getModel(provider, type) {
@@ -224,7 +255,31 @@ function getModel(provider, type) {
     }
     return p[type] || p.fast || p.smart;
 }
-async function runAgent(name, input, overrideType, sender) {
+const ErrorType = {
+    QUOTA: "QUOTA",
+    INVALID_KEY: "INVALID_KEY",
+    MODEL_NOT_FOUND: "MODEL_NOT_FOUND",
+    TRANSIENT: "TRANSIENT",
+    UNKNOWN: "UNKNOWN"
+};
+function classifyError(err) {
+    const msg = String(err.message || "").toLowerCase();
+    const status = err.status || err.response?.status;
+    if (status === 429 || msg.includes("429") || msg.includes("quota") || msg.includes("too many requests") || msg.includes("limit exceeded")) {
+        return ErrorType.QUOTA;
+    }
+    if (status === 401 || status === 403 || msg.includes("api key") || msg.includes("invalid api key") || msg.includes("unauthorized") || msg.includes("api_key_invalid") || msg.includes("api key expired")) {
+        return ErrorType.INVALID_KEY;
+    }
+    if (status === 404 || msg.includes("model not found") || msg.includes("does not exist") || msg.includes("is not found")) {
+        return ErrorType.MODEL_NOT_FOUND;
+    }
+    if (status >= 500 || msg.includes("timeout") || msg.includes("network") || msg.includes("econnreset") || msg.includes("etimedout") || msg.includes("enotfound") || msg.includes("socket hang up")) {
+        return ErrorType.TRANSIENT;
+    }
+    return ErrorType.UNKNOWN;
+}
+async function runAgent(name, input, overrideType, sender, aipipeToken, aipipeModel = "openai/gpt-5-nano", chatId) {
     const agentName = name || "analyzer";
     const a = exports.agents[agentName] || exports.agents.analyzer;
     if (!a)
@@ -239,6 +294,19 @@ async function runAgent(name, input, overrideType, sender) {
         if (!provider)
             provider = "openai";
         const model = getModel(provider, modelType || agentConfig.modelType);
+
+        // Use LangChain Bridge for all compatible cloud providers
+        if (provider === "openai" || provider === "gemini" || provider === "ollama") {
+            return await (0, langchain_1.runLangChainAgent)({
+                input,
+                provider,
+                model: model,
+                agentConfig: agentConfig,
+                sender,
+                chatId
+            });
+        }
+
         if (agentConfig.sdkAgent && provider === "openai") {
             const apiKey = settings.apiKeys?.openai;
             const baseUrl = settings.endpoints?.openaiCompatibleBaseUrl;
@@ -282,10 +350,11 @@ async function runAgent(name, input, overrideType, sender) {
                 provider,
                 model,
                 prompt: currentInput,
-                tools: mcpTools
+                tools: mcpTools,
+                aipipeToken
             });
             if (response.toolCalls && response.toolCalls.length > 0) {
-                console.log(`[Agent] ${provider} requested ${response.toolCalls.length} tool calls...`);
+                logAppEvent("INFO", "Agents", "TOOL_CALL_REQUEST", `${provider} requested ${response.toolCalls.length} tool calls`, { provider });
                 let toolResults = [];
                 for (const call of response.toolCalls) {
                     const toolName = call.function.name;
@@ -319,112 +388,117 @@ async function runAgent(name, input, overrideType, sender) {
             model
         };
     };
-    try {
-        return await execute(a, overrideType);
-    }
-    catch (err) {
-        const msg = String(err.message || "");
-        const isQuotaError = msg.includes("429") || 
-                            msg.toLowerCase().includes("quota") || 
-                            msg.toLowerCase().includes("too many requests") ||
-                            msg.toLowerCase().includes("limit exceeded");
-        
-        if (isQuotaError) {
-            const providers = ["gemini", "openai", "claude", "deepseek"];
-            const currentProvider = a.provider || "gemini";
-            const otherProviders = providers.filter(p => p !== currentProvider);
-            
-            const row = sqlite_1.default.prepare("SELECT data FROM settings WHERE id = 1").get();
-            const settings = row ? JSON.parse(row.data) : {};
-            const keys = settings.apiKeys || {};
-
-            for (const targetProvider of otherProviders) {
-                // Check if we have a key for this provider
-                const keyMap = {
-                    openai: keys.openai,
-                    claude: keys.anthropic,
-                    deepseek: keys.deepseek,
-                    gemini: keys.gemini
-                };
-                
-                if (!keyMap[targetProvider]) continue;
-
-                console.warn(`${currentProvider} Quota exceeded. Attempting automatic fallback to ${targetProvider}...`);
-                if (sender) {
-                    sender.send('tool-event', {
-                        type: 'fallback',
-                        message: `Quota reached on ${currentProvider}. Falling back to ${targetProvider}...`
-                    });
-                }
-                
-                const fallbackAgent = targetProvider === "gemini" ? exports.agents.geminiAgent :
-                                    targetProvider === "claude" ? exports.agents.reasoner :
-                                    exports.agents.analyzer; // Default fallback for openai/deepseek
-
-                try {
-                    const result = await execute({
-                        ...fallbackAgent,
-                        provider: targetProvider
-                    }, overrideType);
-                    
-                    return {
-                        ...result,
-                        text: `[Fallback from ${currentProvider} to ${targetProvider} due to Quota] ${result.text}`,
-                        model: result.model
-                    };
-                }
-                catch (fallbackErr) {
-                    console.error(`Fallback to ${targetProvider} also failed:`, fallbackErr);
-                    // Continue to next provider in chain
-                }
-            }
-            
-            // If all fallbacks failed, check for Ollama
-            if (settings.endpoints?.ollamaBaseUrl) {
-                console.warn("All cloud providers failed. Attempting local Ollama fallback...");
-                if (sender) {
-                    sender.send('tool-event', {
-                        type: 'fallback',
-                        message: `All cloud quotas reached. Attempting local Ollama fallback...`
-                    });
-                }
-                try {
-                    const result = await execute(exports.agents.local, overrideType);
-                    return {
-                        ...result,
-                        text: `[Fallback to Local Ollama] ${result.text}`,
-                        model: result.model
-                    };
-                } catch (ollamaErr) {
-                    console.error("Ollama fallback failed:", ollamaErr);
-                }
-            }
-            
-            throw new Error(`Quota exceeded for ${currentProvider} and no valid fallback providers are available or configured with API keys.`);
+    const executeWithRetry = async (agentConfig, modelType, retryCount = 0) => {
+        const MAX_RETRIES = 2;
+        try {
+            return await execute(agentConfig, modelType);
         }
-        throw err;
-    }
+        catch (err) {
+            const errorType = classifyError(err);
+            const currentProvider = agentConfig.provider || "openai";
+            // 1. Transient Error - Retry with exponential backoff
+            if (errorType === ErrorType.TRANSIENT && retryCount < MAX_RETRIES) {
+                const delay = Math.pow(2, retryCount) * 1000;
+                logAppEvent("WARN", "Agents", "TRANSIENT_ERROR", `Transient error from ${currentProvider}. Retrying...`, { delay, attempt: retryCount + 1 });
+                if (sender) {
+                    sender.send('tool-event', {
+                        type: 'fallback',
+                        message: `Transient error on ${currentProvider}. Retrying in ${delay}ms...`
+                    });
+                }
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return executeWithRetry(agentConfig, modelType, retryCount + 1);
+            }
+            // 2. Quota or Model Not Found - Attempt Fallback
+            if (errorType === ErrorType.QUOTA || errorType === ErrorType.MODEL_NOT_FOUND) {
+                const reason = errorType === ErrorType.QUOTA ? "Quota exceeded" : "Model not found";
+                const providers = ["gemini", "openai", "claude", "deepseek"];
+                const otherProviders = providers.filter(p => p !== currentProvider);
+                const row = sqlite_1.default.prepare("SELECT data FROM settings WHERE id = 1").get();
+                const settings = row ? JSON.parse(row.data) : {};
+                const keys = settings.apiKeys || {};
+                for (const targetProvider of otherProviders) {
+                    const keyMap = {
+                        openai: keys.openai,
+                        claude: keys.anthropic,
+                        deepseek: keys.deepseek,
+                        gemini: keys.gemini
+                    };
+                    if (!keyMap[targetProvider])
+                        continue;
+                    logAppEvent("WARN", "Agents", "FALLBACK_TRIGGER", `${reason} on ${currentProvider}. Attempting fallback.`, { target: targetProvider });
+                    if (sender) {
+                        sender.send('tool-event', {
+                            type: 'fallback',
+                            message: `${reason} on ${currentProvider}. Falling back to ${targetProvider}...`
+                        });
+                    }
+                    const fallbackAgent = targetProvider === "gemini" ? exports.agents.geminiAgent :
+                        targetProvider === "claude" ? exports.agents.reasoner :
+                            exports.agents.analyzer;
+                    try {
+                        const result = await execute({
+                            ...fallbackAgent,
+                            provider: targetProvider
+                        }, modelType);
+                        return {
+                            ...result,
+                            text: `[Fallback from ${currentProvider} to ${targetProvider} due to ${reason}] ${result.text}`,
+                            model: result.model
+                        };
+                    }
+                    catch (fallbackErr) {
+                        console.error(`[Agent] Fallback to ${targetProvider} failed:`, fallbackErr.message);
+                    }
+                }
+                // Last resort: Ollama
+                if (settings.endpoints?.ollamaBaseUrl) {
+                    logAppEvent("WARN", "Agents", "OLLAMA_FALLBACK", "All cloud providers failed. Attempting local Ollama.");
+                    if (sender) {
+                        sender.send('tool-event', {
+                            type: 'fallback',
+                            message: `All cloud providers failed. Attempting local Ollama fallback...`
+                        });
+                    }
+                    try {
+                        const result = await execute(exports.agents.local, modelType);
+                        return {
+                            ...result,
+                            text: `[Fallback to Local Ollama] ${result.text}`,
+                            model: result.model
+                        };
+                    }
+                    catch (ollamaErr) {
+                        console.error("[Agent] Ollama fallback failed:", ollamaErr.message);
+                    }
+                }
+            }
+            // Unrecoverable or all fallbacks failed
+            throw err;
+        }
+    };
+    return await executeWithRetry(a, overrideType);
 }
-async function autoAgent(input, preferredType = "fast", sender) {
+async function autoAgent(input, preferredType = "fast", sender, aipipeToken, aipipeModel = "openai/gpt-5-nano", chatId) {
     const query = input.toLowerCase();
     const type = (preferredType === "smart" || preferredType === "fast") ? preferredType : "fast";
     if (query.includes("homework") || query.includes("triage")) {
-        return runAgent("triage", input, type, sender);
+        return runAgent("triage", input, type, sender, aipipeToken, aipipeModel, chatId);
     }
     if (query.includes("history") || query.includes("ancient") || query.includes("empire")) {
-        return runAgent("historyTutor", input, type, sender);
+        return runAgent("historyTutor", input, type, sender, aipipeToken, aipipeModel, chatId);
     }
     if (query.includes("math") || query.includes("calculate") || query.includes("solve")) {
-        return runAgent("mathTutor", input, type, sender);
+        return runAgent("mathTutor", input, type, sender, aipipeToken, aipipeModel, chatId);
     }
     if (query.includes("code") || query.includes("python") || query.includes("script")) {
-        return runAgent("analyzer", input, type, sender);
+        return runAgent("analyzer", input, type, sender, aipipeToken, aipipeModel, chatId);
     }
     if (query.includes("analyze") || query.includes("data") || query.includes("viz")) {
-        return runAgent("geminiAgent", input, type, sender);
+        return runAgent("geminiAgent", input, type, sender, aipipeToken, aipipeModel, chatId);
     }
     if (query.length > 300 || query.includes("plan") || query.includes("orchestrate") || query.includes("complex")) {
-        return runAgent("master", input, "smart", sender);
+        return runAgent("master", input, "smart", sender, aipipeToken, aipipeModel, chatId);
     }
-    return runAgent("analyzer", input, type, sender);
+    return runAgent("analyzer", input, type, sender, aipipeToken, aipipeModel, chatId);
 }

@@ -4,9 +4,12 @@ import { authController } from './auth.js';
 import { uiController } from './ui.js';
 import { settingsController } from './settings.js';
 import { toolUI } from './toolUI.js';
+import { bindDataDrivenHandlers, collectActiveTools, escapeHtml, maskSecret, setInputValue } from './domUtils.js';
+import { getProviderForAgent } from './agentProvider.js';
 
 // Cached list for validation during save
 let CACHED_MODELS = {};
+let IS_BROWSER_FALLBACK = false;
 
 function createBrowserFallbackApi() {
     const storagePrefix = 'nd_store_';
@@ -18,10 +21,11 @@ function createBrowserFallbackApi() {
         }),
         getModels: async () => ({
             openai: { fast: 'gpt-4o-mini', smart: 'gpt-4o', metadata: { 'gpt-4o-mini': { limit: '128k', price: '$0.15/1M' }, 'gpt-4o': { limit: '128k', price: '$2.50/1M' } } },
-            claude: { fast: 'claude-3-haiku', smart: 'claude-3-sonnet', metadata: { 'claude-3-haiku': { limit: '200k', price: '$0.25/1M' }, 'claude-3-sonnet': { limit: '200k', price: '$3.00/1M' } } },
+            claude: { fast: 'claude-3-5-haiku', smart: 'claude-3-5-sonnet', metadata: { 'claude-3-5-haiku': { limit: '200k', price: '$0.25/1M' }, 'claude-3-5-sonnet': { limit: '200k', price: '$3.00/1M' } } },
             gemini: { fast: 'gemini-1.5-flash', smart: 'gemini-1.5-pro', metadata: { 'gemini-1.5-flash': { limit: '1M', price: 'Free' }, 'gemini-1.5-pro': { limit: '2M', price: '$3.50/1M' } } },
-            ollama: { fast: 'llama3', smart: 'mistral', metadata: { 'llama3': { limit: '8k', price: 'Local' }, 'mistral': { limit: '32k', price: 'Local' } } },
-            deepseek: { fast: 'deepseek-chat', smart: 'deepseek-reasoner', metadata: { 'deepseek-chat': { limit: '128k', price: '$0.14/1M' }, 'deepseek-reasoner': { limit: '64k', price: '$0.55/1M' } } }
+            ollama: { fast: 'llama3', smart: 'llama3.3', metadata: { 'llama3.3': { limit: '128k', price: 'Local' }, 'llama3': { limit: '128k', price: 'Local' }, 'mistral': { limit: '32k', price: 'Local' } } },
+            deepseek: { fast: 'deepseek-chat', smart: 'deepseek-reasoner', metadata: { 'deepseek-chat': { limit: '128k', price: '$0.14/1M' }, 'deepseek-reasoner': { limit: '64k', price: '$0.55/1M' } } },
+            aipipe: { fast: 'openai/gpt-5-nano', smart: 'openai/gpt-5-nano', metadata: { 'openai/gpt-5-nano': { limit: '128k', price: '$0.10/1M' } } }
         }),
         saveData: async (key, data) => {
             localStorage.setItem(storagePrefix + key, JSON.stringify(data));
@@ -50,166 +54,52 @@ function createBrowserFallbackApi() {
         login: async (creds) => ({ ok: true, user: { username: creds?.username || 'Guest' } }),
         checkSession: async () => ({ ok: true }),
         logout: async () => ({ ok: true }),
-        clearSession: async (_chatId) => ({ ok: true })
+        clearSession: async (_chatId) => ({ ok: true }),
+        clearChatHistory: async (_chatId) => ({ ok: true })
     };
 }
 if (!window.electronAPI) {
     window.electronAPI = createBrowserFallbackApi();
+    IS_BROWSER_FALLBACK = true;
 }
-function resolvePath(pathExpr, root = window) {
-    return pathExpr.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), root);
-}
-function splitArgs(argsRaw) {
-    const args = [];
-    let current = '';
-    let quote = null;
-    let depth = 0;
-    for (let i = 0; i < argsRaw.length; i++) {
-        const ch = argsRaw[i];
-        if (quote) {
-            current += ch;
-            if (ch === quote && argsRaw[i - 1] !== '\\')
-                quote = null;
-            continue;
-        }
-        if (ch === '\'' || ch === '"') {
-            quote = ch;
-            current += ch;
-            continue;
-        }
-        if (ch === '(') {
-            depth++;
-            current += ch;
-            continue;
-        }
-        if (ch === ')') {
-            depth = Math.max(0, depth - 1);
-            current += ch;
-            continue;
-        }
-        if (ch === ',' && depth === 0) {
-            args.push(current.trim());
-            current = '';
-            continue;
-        }
-        current += ch;
-    }
-    if (current.trim())
-        args.push(current.trim());
-    return args;
-}
-function parseArg(token, element, event) {
-    if (token === 'this')
-        return element;
-    if (token === 'event')
-        return event;
-    if (token === 'true')
-        return true;
-    if (token === 'false')
-        return false;
-    if (token === 'null')
-        return null;
-    if (token === 'undefined')
-        return undefined;
-    if (/^-?\d+(\.\d+)?$/.test(token))
-        return Number(token);
-    const quoted = token.match(/^(['"])(.*)\1$/);
-    if (quoted)
-        return quoted[2];
-    const resolved = resolvePath(token);
-    return resolved !== undefined ? resolved : token;
-}
-function executeDataExpression(expr, element, event) {
-    const trimmed = expr.trim();
-    if (!trimmed)
+function showBrowserModeBanner() {
+    const existing = document.getElementById('browserModeBanner');
+    if (existing)
         return;
-    const tempMatch = trimmed.match(/^document\.getElementById\('([^']+)'\)\.textContent=this\.value$/);
-    if (tempMatch) {
-        const target = document.getElementById(tempMatch[1]);
-        if (target && element instanceof HTMLInputElement) {
-            target.textContent = element.value;
-        }
-        return;
-    }
-    const callMatch = trimmed.match(/^([A-Za-z_$][\w$.]*)\((.*)\)$/);
-    if (!callMatch) {
-        const fnNoArgs = resolvePath(trimmed);
-        if (typeof fnNoArgs === 'function')
-            fnNoArgs();
-        return;
-    }
-    const fn = resolvePath(callMatch[1]);
-    if (typeof fn !== 'function') {
-        console.warn('Missing handler for expression:', trimmed);
-        return;
-    }
-    const args = splitArgs(callMatch[2]).map(arg => parseArg(arg, element, event));
-    fn(...args);
-}
-function bindDataDrivenHandlers() {
-    const delegate = (attr, eventName) => {
-        document.addEventListener(eventName, (event) => {
-            const rawTarget = event.target;
-            const target = rawTarget instanceof Element
-                ? rawTarget
-                : rawTarget instanceof Node
-                    ? rawTarget.parentElement
-                    : null;
-            const el = target?.closest(`[${attr}]`);
-            if (!el)
-                return;
-            const expr = el.getAttribute(attr);
-            if (!expr)
-                return;
-            executeDataExpression(expr, el, event);
-        });
-    };
-    delegate('data-onclick', 'click');
-    delegate('data-onchange', 'change');
-    delegate('data-oninput', 'input');
-    delegate('data-onkeydown', 'keydown');
-}
-function setInputValue(id, value) {
-    const el = document.getElementById(id);
-    if (!el)
-        return;
-    if (typeof value === 'undefined' || value === null)
-        return;
-    el.value = String(value);
-}
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-function maskSecret(secret) {
-    const raw = String(secret || '');
-    if (!raw)
-        return 'Not set';
-    if (raw.length <= 8)
-        return `${raw.slice(0, 2)}...${raw.slice(-1)}`;
-    return `${raw.slice(0, 4)}...${raw.slice(-4)}`;
+    const banner = document.createElement('div');
+    banner.id = 'browserModeBanner';
+    banner.className = 'browser-mode-banner';
+    banner.textContent = 'Running in Browser Demo Mode. Desktop features (IPC, real auth, local runtime) are unavailable.';
+    document.body.appendChild(banner);
 }
 function renderKeysPanel(settings) {
     const panel = document.getElementById('panelKeysList');
     if (!panel)
         return;
     const apiKeys = settings?.apiKeys || {};
+    const defaultProvider = settings?.ai?.defaultProvider || '';
+    const providerForKey = {
+        openai: 'openai',
+        anthropic: 'claude',
+        gemini: 'gemini',
+        deepseek: 'deepseek',
+        aipipe: 'aipipe',
+    };
     const keyDefs = [
         { id: 'openai', label: 'OpenAI' },
         { id: 'anthropic', label: 'Anthropic' },
         { id: 'gemini', label: 'Gemini' },
-        { id: 'deepseek', label: 'DeepSeek' }
+        { id: 'deepseek', label: 'DeepSeek' },
+        { id: 'aipipe', label: 'AIpipe' },
     ];
     panel.innerHTML = keyDefs.map(({ id, label }) => {
         const value = String(apiKeys[id] || '').trim();
         const hasValue = value.length > 0;
+        const isDefaultProvider = providerForKey[id] === defaultProvider;
+        const status = hasValue ? 'running' : (isDefaultProvider ? 'setup' : 'missing');
         return `
-      <div class="memory-item">
-        <div class="memory-label">${escapeHtml(label)} (${hasValue ? 'active' : 'missing'})</div>
+      <div class="memory-item key-status key-status-${status}">
+        <div class="memory-label">${escapeHtml(label)} <span class="key-status-badge key-status-badge-${status}">${status}</span></div>
         <div>${escapeHtml(maskSecret(value))}</div>
       </div>
     `;
@@ -254,11 +144,11 @@ function populateProviderSelect(providers, apiKeys = {}) {
     
     // Map provider names to their API key identifiers in settings
     const keyMap = { claude: 'anthropic' };
-    
+
     const currentSelection = select.value;
     select.innerHTML = providers.map(p => {
         const keyName = keyMap[p] || p;
-        const hasKey = !!apiKeys[keyName] || p === 'ollama'; // Ollama is local, usually "active"
+        const hasKey = !!apiKeys[keyName] || p === 'ollama'; 
         const label = p.charAt(0).toUpperCase() + p.slice(1);
         const indicator = hasKey ? '●' : '○';
         
@@ -297,27 +187,14 @@ function updateModelOptions() {
     if (!modelSelect || !CACHED_MODELS)
         return;
     const agentName = agentSelect?.value || 'auto';
-    const agentToProvider = {
-        'geminiAgent': 'gemini',
-        'local': 'ollama',
-        'deepseekAgent': 'deepseek',
-        'mathTutor': 'openai',
-        'triage': 'openai',
-        'master': 'openai',
-        'historyTutor': 'openai',
-        'analyzer': 'openai',
-        'reasoner': 'openai'
-    };
-    const provider = agentToProvider[agentName] || window.appData.settings?.ai?.defaultProvider || 'gemini';
-    const info = CACHED_MODELS[provider];
-    if (info) {
-        const currentVal = modelSelect.value;
-        modelSelect.innerHTML = `
-            <option value="fast" ${currentVal === 'fast' ? 'selected' : ''}>${info.fast || 'Fast Model'}</option>
-            <option value="smart" ${currentVal === 'smart' ? 'selected' : ''}>${info.smart || 'Smart Model'}</option>
-            <option value="latest">Latest Model</option>
-        `;
-    }
+    const provider = getProviderForAgent(agentName, window.appData.settings?.ai?.defaultProvider || 'gemini');
+    const info = CACHED_MODELS[provider] || CACHED_MODELS.openai || {};
+    const currentVal = modelSelect.value;
+    modelSelect.innerHTML = `
+        <option value="fast" ${currentVal === 'fast' ? 'selected' : ''}>${info.fast || 'Fast Model'}</option>
+        <option value="smart" ${currentVal === 'smart' ? 'selected' : ''}>${info.smart || 'Smart Model'}</option>
+        <option value="latest" ${currentVal === 'latest' ? 'selected' : ''}>${info.latest || 'Latest Model'}</option>
+    `;
 }
 
 async function applySettingsToUI(settings) {
@@ -350,6 +227,7 @@ async function applySettingsToUI(settings) {
     const ai = settings.ai || {};
     const ui = settings.ui || {};
     const endpoints = settings.endpoints || {};
+    const privacy = settings.privacy || {};
     setInputValue('defaultProviderSelect', ai.defaultProvider);
     setInputValue('aiTemperature', ai.temperature);
     setInputValue('maxTokens', ai.maxTokens);
@@ -358,10 +236,16 @@ async function applySettingsToUI(settings) {
     setInputValue('displayName', ui.displayName);
     setToggleState('autoscroll', ui.autoScroll);
     setToggleState('compact', ui.compact);
+    // Ensure privacy settings are loaded and applied
+    setInputValue('logRetentionSelect', privacy.logRetention || '30');
+    setToggleState('clearOnExit', privacy.clearOnExit);
+    setToggleState('incognito', privacy.incognito);
+    uiController.updateIncognitoIndicator(privacy.incognito);
     setInputValue('anthropicKey', apiKeys.anthropic);
     setInputValue('geminiKey', apiKeys.gemini);
     setInputValue('openaiKey', apiKeys.openai);
     setInputValue('deepseekKey', apiKeys.deepseek);
+    setInputValue('aipipeKey', apiKeys.aipipe);
     setInputValue('customBaseUrl', endpoints.openaiCompatibleBaseUrl);
     setInputValue('ollamaBaseUrl', endpoints.ollamaBaseUrl);
     applyTopbarState(settings.topbar || {});
@@ -458,6 +342,9 @@ window.streamState = {
 // Application Bootstrap
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('NeuralDesk Core Initialized');
+    if (IS_BROWSER_FALLBACK) {
+        showBrowserModeBanner();
+    }
     bindDataDrivenHandlers();
     // Load initial data from backend first
     try {
@@ -467,7 +354,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const settings = await window.electronAPI.getSettings();
         if (settings)
             window.appData.settings = settings;
-        applySettingsToUI(window.appData.settings);
+        await applySettingsToUI(window.appData.settings);
         await loadMcpConfigIntoUI();
         // Initial Render
         updateUIFromState();
@@ -541,13 +428,11 @@ window.toolUI = toolUI;
 window.refreshSettingsPanels = () => {
     renderKeysPanel(window.appData.settings || {});
     applyTopbarState(window.appData.settings?.topbar || {});
+    uiController.updateIncognitoIndicator(window.appData.settings?.privacy?.incognito);
 };
 window.switchView = (view, el) => router.switchView(view, el);
 window.sendMessage = () => {
-    const activeTools = Array.from(document.querySelectorAll('.tool-btn.active, .btn-tool.active, .toolbar-btn.active, [data-tool].active'))
-        .map(btn => btn.getAttribute('data-tool') || btn.textContent?.trim().toLowerCase().replace(/\s+/g, '_'))
-        .filter(Boolean);
-    chatController.sendMessage(activeTools);
+    chatController.sendMessage(collectActiveTools());
 };
 window.login = window.handleLogin = async () => {
     const res = await authController.login();
@@ -595,6 +480,7 @@ window.toggleAuthView = () => {
     }
 };
 window.newChat = () => {
+    chatController.resetComposerState();
     window.state.currentChatId = null;
     window.state.messages = [];
     const container = document.getElementById('chatMessages');
@@ -649,6 +535,15 @@ window.newChat = () => {
             `;
         }
     }
+    const input = document.getElementById('chatInput');
+    if (input) {
+        input.disabled = false;
+        input.readOnly = false;
+        input.removeAttribute('disabled');
+        input.removeAttribute('readonly');
+        input.style.pointerEvents = 'auto';
+        input.focus();
+    }
     renderHistory();
 };
 window.loadChat = (id) => {
@@ -672,6 +567,35 @@ window.loadChat = (id) => {
         renderHistory();
     }
 };
+window.clearChatHistory = async () => {
+    const chatId = window.state.currentChatId;
+    if (!chatId) return;
+    if (!confirm('Are you sure you want to clear the memory for this conversation? This cannot be undone.')) return;
+
+    try {
+        const res = await window.electronAPI.clearChatHistory(chatId);
+        if (res.ok) {
+            // Clear local state
+            window.state.messages = [];
+            const chat = window.appData.chatHistory.find(c => c.id === chatId);
+            if (chat) chat.messages = [];
+            
+            // Clear memory session in main process
+            await window.electronAPI.clearSession(chatId);
+
+            // Refresh UI
+            const container = document.getElementById('chatMessages');
+            if (container) container.innerHTML = '';
+            window.loadChat(chatId); // Reload the now-empty chat
+            
+            uiController.showToast('Conversation memory cleared', 'success');
+        } else {
+            uiController.showToast('Failed to clear memory: ' + res.error, 'error');
+        }
+    } catch (err) {
+        console.error('Clear History Error:', err);
+    }
+};
 window.deleteChat = async (chatId, event) => {
     if (event)
         event.stopPropagation();
@@ -682,6 +606,7 @@ window.deleteChat = async (chatId, event) => {
         if (res.ok) {
             window.appData.chatHistory = window.appData.chatHistory.filter(c => c.id !== chatId);
             if (window.state.currentChatId === chatId) {
+                chatController.resetComposerState();
                 window.newChat();
             }
             renderHistory();
@@ -715,7 +640,6 @@ window.saveSettings = () => {
 };
 window.toggleSetting = (id) => settingsController.toggleSetting(id);
 window.updateModelTooltip = () => updateModelTooltip();
-window.checkConnection = () => uiController.checkConnection();
 window.onAgentChange = () => {
     updateModelOptions();
     window.checkConnection();
@@ -787,7 +711,6 @@ window.closeOnOutside = (event, modalId, closeFn) => uiController.closeOnOutside
 window.setArtifactView = (v) => uiController.setArtifactView(v);
 window.closeArtifact = () => uiController.closeArtifact();
 window.handleKey = (e) => uiController.handleKey(e, () => chatController.sendMessage());
-window.autoResize = (el) => uiController.autoResize(el);
 window.cancelGeneration = () => {
     window.streamState.isGenerating = false;
     uiController.showToast('Generation cancelled', 'info');
@@ -801,7 +724,7 @@ window.selectTab = (el) => {
 window.attachFile = () => notReady('File attachment');
 window.voiceInput = () => notReady('Voice input');
 window.copyMessage = () => notReady('Copy action');
-window.regenMessage = () => notReady('Regenerate');
+window.regenMessage = window.retryMessage = () => chatController.retryLastMessage();
 window.editMessage = () => notReady('Message editing');
 window.deleteMessage = () => notReady('Delete action');
 window.runAgentFlow = () => notReady('Agent flow builder');

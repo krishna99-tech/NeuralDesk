@@ -138,7 +138,7 @@ function sanitizeSchemaForPlanning(schema) {
     return res;
 }
 // ─── Planning Prompt ─────────────────────────────────────────────────────────
-function buildPlanningPrompt(userQuery, tools, history) {
+function buildPlanningPrompt(userQuery, tools, history, aipipeToken) {
     const toolList = tools.map(t => `- ${t.name}: ${t.description}`).join("\n");
     const historyText = history.slice(-6)
         .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
@@ -155,7 +155,7 @@ User request: ${userQuery}
 
 Respond ONLY with a JSON array of steps. Each step: { "tool": "<tool_name>", "args": {}, "reason": "<why>" }.
 For simple text queries, return: [{ "tool": "none", "args": {}, "reason": "Direct answer" }]
-Do not add any text outside the JSON array.`;
+Do not add any text outside the JSON array. ${aipipeToken ? `(AIpipe token available: ${aipipeToken.substring(0, 5)}...)` : ''}`;
 }
 // ─── Synthesis Prompt ─────────────────────────────────────────────────────────
 function buildSynthesisPrompt(userQuery, steps, history) {
@@ -181,7 +181,7 @@ ${resultsText}
 Provide a comprehensive, well-formatted final answer.`;
 }
 // ─── Main Orchestrate Function ─────────────────────────────────────────────────
-async function orchestrate({ input, provider, model, sessionData, history, sender }) {
+async function orchestrate({ input, provider, model, sessionData, history, sender, aipipeToken }) {
     if (sender)
         setSender(sender);
     const tools = getAllTools();
@@ -190,9 +190,8 @@ async function orchestrate({ input, provider, model, sessionData, history, sende
     let plan = [];
     try {
         const planResponse = await (0, router_1.default)({
-            provider,
-            model,
-            prompt: buildPlanningPrompt(input, tools, history || [])
+            provider, model, aipipeToken,
+            prompt: buildPlanningPrompt(input, tools, history || [], aipipeToken)
         });
         const raw = planResponse.text.trim();
         const jsonMatch = raw.match(/\[[\s\S]*\]/);
@@ -247,7 +246,7 @@ async function orchestrate({ input, provider, model, sessionData, history, sende
         const synthesisPrompt = hasRealResults
             ? buildSynthesisPrompt(input, executedSteps, history || [])
             : input;
-        const synthResponse = await (0, router_1.default)({ provider, model, prompt: synthesisPrompt });
+        const synthResponse = await (0, router_1.default)({ provider, model, prompt: synthesisPrompt, aipipeToken });
         finalText = synthResponse.text;
     }
     catch (err) {

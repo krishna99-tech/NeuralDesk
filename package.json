@@ -27,6 +27,7 @@
     "productName": "neuraldesk-desktop",
     "win": {
       "target": [
+        "nsis",
         "portable"
       ],
       "icon": "assets/icon.ico"
@@ -54,10 +55,13 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@langchain/community": "^1.1.27",
+    "@langchain/core": "^1.1.42",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openai/agents": "^0.8.5",
     "axios": "^1.15.2",
     "better-sqlite3": "^12.9.0",
+    "langchain": "^1.3.5",
     "zod": "^4.3.6"
   }
 }

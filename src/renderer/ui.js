@@ -1,3 +1,5 @@
+import { getProviderForAgent } from './agentProvider.js';
+
 export class UIController {
     settingsModal = null;
     toastContainer = null;
@@ -105,25 +107,15 @@ export class UIController {
             return;
         const agentSelect = document.getElementById('agentSelect');
         const agentName = agentSelect?.value || 'auto';
-        const agentToProvider = {
-            'geminiAgent': 'gemini',
-            'local': 'ollama',
-            'deepseekAgent': 'deepseek',
-            'mathTutor': 'openai',
-            'triage': 'openai',
-            'master': 'openai',
-            'historyTutor': 'openai',
-            'analyzer': 'openai',
-            'reasoner': 'openai'
-        };
-        const provider = agentToProvider[agentName] || window.appData.settings?.ai?.defaultProvider || 'openai';
+        const provider = getProviderForAgent(agentName, window.appData.settings?.ai?.defaultProvider || 'openai');
         const keys = window.appData.settings?.apiKeys || {};
         const keyMap = {
             openai: keys.openai,
             claude: keys.anthropic,
             gemini: keys.gemini,
             deepseek: keys.deepseek,
-            ollama: true
+            ollama: true,
+            aipipe: keys.aipipe ? true : false
         };
         const hasKey = keyMap[provider];
         if (hasKey) {
@@ -133,6 +125,13 @@ export class UIController {
         else {
             badge.textContent = 'Disconnected';
             badge.className = 'connection-badge offline';
+        }
+    }
+    updateIncognitoIndicator(active) {
+        const el = document.getElementById('incognitoIndicator');
+        if (el) {
+            if (active) el.classList.remove('hidden');
+            else el.classList.add('hidden');
         }
     }
     setArtifactView(view) {

@@ -121,6 +121,22 @@ body::before {
   pointer-events: none;
   z-index: 0;
 }
+
+.browser-mode-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 12000;
+  padding: 8px 14px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: linear-gradient(90deg, #b45309, #ea580c);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+}
 body::after {
   content: '';
   position: fixed;
@@ -662,10 +678,58 @@ body::after {
   position: relative;
 }
 .msg-bubble.ai {
-  background: var(--bg1);
-  border: 1px solid var(--border);
-  border-radius: 2px 12px 12px 12px;
+  background:
+    linear-gradient(180deg, rgba(124,106,255,0.05) 0%, rgba(124,106,255,0.01) 28%, rgba(0,0,0,0) 100%),
+    var(--bg1);
+  border: 1px solid rgba(124,106,255,0.14);
+  border-radius: 4px 14px 14px 14px;
   color: var(--text1);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  padding: 14px 16px;
+}
+.resp-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  color: var(--text3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--font-mono);
+}
+.resp-meta-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  color: var(--accent);
+  background: rgba(124,106,255,0.16);
+  border: 1px solid rgba(124,106,255,0.35);
+  font-size: 10px;
+}
+.resp-meta-provider {
+  color: var(--text2);
+  font-weight: 700;
+}
+.resp-meta-model {
+  color: var(--accent3);
+  background: rgba(34,211,238,0.12);
+  border: 1px solid rgba(34,211,238,0.3);
+  border-radius: 999px;
+  padding: 1px 8px;
+  max-width: 48%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.resp-meta-time {
+  margin-left: auto;
+  color: var(--text3);
 }
 .msg-bubble.user-msg {
   background: linear-gradient(135deg, rgba(124,106,255,0.2), rgba(168,85,247,0.15));
@@ -1047,6 +1111,38 @@ body::after {
 }
 .memory-item:hover { background: var(--bg4); color: var(--text1); }
 .memory-label { font-size: 9px; color: var(--text3); font-family: var(--font-mono); text-transform: uppercase; margin-bottom: 2px; }
+.memory-label .key-status-badge {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.key-status-running {
+  border-left-color: var(--green);
+}
+.key-status-setup {
+  border-left-color: var(--amber);
+}
+.key-status-missing {
+  border-left-color: var(--red);
+}
+.key-status-badge-running {
+  color: var(--green);
+  background: rgba(52, 211, 153, 0.15);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+}
+.key-status-badge-setup {
+  color: var(--amber);
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+.key-status-badge-missing {
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.15);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
 
 /* Integration card */
 .integration-card {
@@ -1536,13 +1632,38 @@ body::after {
 .ap-action { color: var(--text3); font-size: 16px; }
 
 /* Markdown Styling */
-.msg-bubble p { margin-bottom: 12px; line-height: 1.6; }
+.msg-bubble p { margin-bottom: 12px; line-height: 1.7; }
 .msg-bubble p:last-child { margin-bottom: 0; }
 .msg-bubble code { font-family: var(--font-mono); background: rgba(255,255,255,0.05); padding: 2px 4px; border-radius: 4px; font-size: 0.9em; }
-.msg-bubble pre { margin: 12px 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+.msg-bubble pre { margin: 12px 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: rgba(0,0,0,0.22); }
 .msg-bubble table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 12px; }
 .msg-bubble th, .msg-bubble td { border: 1px solid var(--border2); padding: 8px 12px; text-align: left; }
 .msg-bubble th { background: rgba(255,255,255,0.03); font-weight: 700; }
+.msg-bubble h1, .msg-bubble h2, .msg-bubble h3, .msg-bubble h4 {
+  margin: 10px 0 8px;
+  line-height: 1.35;
+  color: var(--text1);
+}
+.msg-bubble h1 { font-size: 20px; }
+.msg-bubble h2 { font-size: 17px; }
+.msg-bubble h3 { font-size: 15px; }
+.msg-bubble ol,
+.msg-bubble ul {
+  margin: 8px 0 12px 20px;
+  padding-left: 0;
+}
+.msg-bubble li {
+  margin: 6px 0;
+  line-height: 1.65;
+}
+.msg-bubble li > p {
+  margin: 0;
+}
+.msg-bubble hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
+}
 
 /* ─── Tool Activity Panel ────────────────────────────────────────────── */
 .tool-activity-panel {
@@ -1781,6 +1902,36 @@ body::after {
     gap: 12px;
     padding: 6px 0;
 }
+.usage-analytics-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.usage-pill {
+    padding: 4px 10px;
+    border: 1px solid var(--border-color, #d0d0d0);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary, #555);
+    background: var(--surface, #fff);
+}
+.usage-pill-model {
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.usage-pill-status {
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.usage-running { color: var(--amber); border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.1); }
+.usage-ok { color: var(--green); border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.1); }
+.usage-error { color: var(--red); border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.1); }
+.usage-stopped { color: var(--text-muted, #888); border-color: var(--border-color, #d0d0d0); background: rgba(255,255,255,0.04); }
+.usage-idle { color: var(--text-muted, #888); border-color: var(--border-color, #d0d0d0); background: rgba(255,255,255,0.04); }
 
 .options-group {
     display: flex;
@@ -1851,4 +2002,11 @@ body::after {
     background: rgba(248, 113, 113, 0.1) !important;
     border: 1px solid var(--red) !important;
     color: var(--red) !important;
+}
+
+#incognitoIndicator {
+    color: var(--amber);
+    border-color: rgba(251, 191, 36, 0.4);
+    background: rgba(251, 191, 36, 0.1);
+    cursor: help;
 }

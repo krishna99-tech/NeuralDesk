@@ -16,6 +16,11 @@ export class SettingsController {
                 autoScroll: document.getElementById('setting-autoscroll')?.classList.contains('on'),
                 compact: document.getElementById('setting-compact')?.classList.contains('on')
             },
+            privacy: {
+                logRetention: document.getElementById('logRetentionSelect')?.value || '30',
+                clearOnExit: document.getElementById('setting-clearOnExit')?.classList.contains('on'),
+                incognito: document.getElementById('setting-incognito')?.classList.contains('on')
+            },
             endpoints: {
                 openaiCompatibleBaseUrl: document.getElementById('customBaseUrl')?.value || '',
                 ollamaBaseUrl: document.getElementById('ollamaBaseUrl')?.value || ''
@@ -24,7 +29,8 @@ export class SettingsController {
                 anthropic: document.getElementById('anthropicKey')?.value,
                 gemini: document.getElementById('geminiKey')?.value,
                 openai: document.getElementById('openaiKey')?.value,
-                deepseek: document.getElementById('deepseekKey')?.value
+                deepseek: document.getElementById('deepseekKey')?.value,
+                aipipe: document.getElementById('aipipeKey')?.value,
             },
             topbar: {
                 selectedAgent: document.getElementById('agentSelect')?.value || 'auto',

@@ -1,11 +1,19 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const generative_ai_1 = require("@google/generative-ai");
+const generative_ai_1 = require("@google/generative-ai"); // No changes needed here
+const { logAppEvent } = require("../logger");
+const { sanitizeSchema } = require("../utils/schema");
+
 exports.default = async ({ prompt, model, apiKey, systemPrompt, temperature, maxTokens, tools }) => {
     if (!apiKey)
         throw new Error("Google Gemini API Key is missing. Please configure it in Settings.");
+    const requestedModel = model || "gemini-1.5-flash";
+    logAppEvent("INFO", "Gemini", "GEMINI_REQUEST", `Sending request to model: ${requestedModel}`, { model: requestedModel });
     const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
-    const requestedModel = model || "gemini-2.5-flash";
+
     try {
         const modelOptions = {
             model: requestedModel,
@@ -42,6 +50,7 @@ exports.default = async ({ prompt, model, apiKey, systemPrompt, temperature, max
                     }]
             };
         }
+        logAppEvent("INFO", "Gemini", "GEMINI_RESPONSE", "Received successful response from Gemini");
         return { text: response.text(), model: requestedModel };
     }
     catch (err) {
@@ -52,41 +61,23 @@ exports.default = async ({ prompt, model, apiKey, systemPrompt, temperature, max
                 lowerMessage.includes("api key expired") ||
                 lowerMessage.includes("invalid api key"));
         if (isApiKeyInvalid) {
+            logAppEvent("ERROR", "Gemini", "GEMINI_AUTH_ERROR", "Invalid or expired API key detected");
             throw new Error("Gemini API key is invalid or expired. Open Settings > API Keys & Integrations, update the Google AI key, and save.");
         }
         const isModelNotFound = (err && err.status === 404) ||
             (typeof err?.message === "string" &&
                 err.message.toLowerCase().includes("is not found"));
-        if (isModelNotFound && requestedModel !== "gemini-2.5-flash") {
-            const fallback = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        if (isModelNotFound && requestedModel !== "gemini-1.5-flash") {
+            logAppEvent("WARN", "Gemini", "GEMINI_FALLBACK", `Model '${requestedModel}' not found. Attempting fallback to gemini-1.5-flash.`);
+            const fallback = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
             const retry = await fallback.generateContent(prompt);
-            return { text: retry.response.text(), model: "gemini-2.5-flash" };
+            return { text: retry.response.text(), model: "gemini-1.5-flash" };
         }
         if (isModelNotFound) {
-            throw new Error(`Gemini model '${requestedModel}' is unavailable for this API/version. Try 'gemini-2.5-flash' or 'gemini-2.5-pro' in your model config.`);
+            logAppEvent("ERROR", "Gemini", "GEMINI_MODEL_ERROR", `Model '${requestedModel}' is unavailable.`);
+            throw new Error(`Gemini model '${requestedModel}' is unavailable. Try 'gemini-1.5-flash' or 'gemini-1.5-pro' in your model config.`);
         }
+        logAppEvent("ERROR", "Gemini", "GEMINI_API_ERROR", err.message, { stack: err.stack });
         throw err;
     }
 };
-/**
- * Sanitizes JSON Schema for Gemini's strict requirements.
- */
-function sanitizeSchema(schema) {
-    if (!schema || typeof schema !== "object")
-        return schema;
-    const res = Array.isArray(schema) ? [] : {};
-    for (const key in schema) {
-        if (key === "additionalProperties" || key === "$schema")
-            continue;
-        if (key === "default" && typeof schema[key] === "undefined")
-            continue;
-        const val = schema[key];
-        if (typeof val === "object" && val !== null) {
-            res[key] = sanitizeSchema(val);
-        }
-        else {
-            res[key] = val;
-        }
-    }
-    return res;
-}

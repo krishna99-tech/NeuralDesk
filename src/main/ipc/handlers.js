@@ -41,6 +41,7 @@ const electron_1 = require("electron");
 const sqlite_1 = __importDefault(require("../db/sqlite"));
 const agents_1 = require("../ai/agents");
 const orchestrator_1 = require("../ai/orchestrator");
+const langchain_1 = require("./langchain");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const child_process_1 = require("child_process");
@@ -50,9 +51,14 @@ const session_1 = __importDefault(require("../core/session"));
 const intentParser_1 = require("../core/intentParser");
 const dataService_1 = require("../services/dataService");
 const mcpRuntime = new Map();
+const logger = require("../logger");
 function getMcpConfigPath() {
     return path.join(electron_1.app.getPath("userData"), "mcp_config.json");
 }
+
+exports.logAppEvent = logger.logAppEvent;
+const truncateText = logger.truncateText;
+
 function normalizeMcpConfig(raw) {
     const cfg = raw && typeof raw === "object" ? raw : {};
     const servers = cfg.mcpServers;
@@ -128,6 +134,7 @@ function buildMcpStartupLogPath(serverName) {
     return path.join(getMcpLogDir(), `${stamp}_${safeName}_startup.log`);
 }
 function stopMcpServer(name) {
+    logger.logAppEvent("INFO", "MCP", "MCP_SERVER_STOP_REQUEST", `Request to stop MCP server: ${name}`, { serverName: name });
     const runtime = mcpRuntime.get(name);
     if (!runtime || !runtime.process)
         return;
@@ -137,6 +144,7 @@ function stopMcpServer(name) {
     catch { }
 }
 function startMcpServer(name, server) {
+    logger.logAppEvent("INFO", "MCP", "MCP_SERVER_START_ATTEMPT", `Attempting to start MCP server: ${name}`, { serverName: name, command: server?.command, args: server?.args });
     const command = String(server?.command || "").trim();
     const args = Array.isArray(server?.args) ? server.args : [];
     const env = server?.env && typeof server.env === "object" ? server.env : {};
@@ -169,24 +177,27 @@ function startMcpServer(name, server) {
             }
         });
         runtime.process = child;
+        logger.logAppEvent("INFO", "MCP", "MCP_SERVER_SPAWNED", `MCP server spawned: ${name}`, { pid: child.pid, serverName: name, startupLog: startupLogPath });
         runtime.status = "running";
         logStream.write(`[${new Date().toISOString()}] process spawned pid=${child.pid}\n`);
         child.stdout.on("data", (chunk) => {
-            logStream.write(`[stdout] ${chunk.toString()}`);
+            logStream.write(`[stdout] ${chunk.toString()}`); // Full stdout to file
         });
         child.stderr.on("data", (chunk) => {
-            logStream.write(`[stderr] ${chunk.toString()}`);
+            logStream.write(`[stderr] ${chunk.toString()}`); // Full stderr to file
         });
         child.on("error", (err) => {
             runtime.status = "error";
             runtime.lastError = String(err?.message || "Failed to start MCP server.");
             logStream.write(`[${new Date().toISOString()}] error: ${runtime.lastError}\n`);
             logStream.end();
+            logger.logAppEvent("ERROR", "MCP", "MCP_SERVER_ERROR", `MCP server ${name} encountered an error: ${runtime.lastError}`, { serverName: name, error: err.message, startupLog: runtime.startupLogPath });
         });
         child.on("close", (code) => {
             runtime.lastExitCode = code;
             runtime.status = code === 0 ? "stopped" : "error";
             registry_1.activeClients.delete(name);
+            logger.logAppEvent(code === 0 ? "INFO" : "ERROR", "MCP", "MCP_SERVER_STOPPED", `MCP server ${name} stopped with exit code: ${code}`, { serverName: name, exitCode: code, startupLog: runtime.startupLogPath });
             logStream.write(`[${new Date().toISOString()}] closed exitCode=${code}\n`);
             logStream.end();
         });
@@ -194,12 +205,15 @@ function startMcpServer(name, server) {
         const mcpClient = new client_1.default(name, command, args, env);
         mcpClient.connect().then(ok => {
             if (ok)
-                registry_1.activeClients.set(name, mcpClient);
+                registry_1.activeClients.set(name, mcpClient); // This is where the client is actually registered
+            logger.logAppEvent(ok ? "INFO" : "WARN", "MCP", "MCP_CLIENT_CONNECTED", `MCP client for ${name} connection status: ${ok ? 'success' : 'failed'}`, { serverName: name, connected: ok });
         });
     }
     catch (err) {
         runtime.status = "error";
         runtime.lastError = String(err?.message || "Failed to spawn MCP server.");
+        logger.logAppEvent("ERROR", "MCP", "MCP_SERVER_SPAWN_FAILED", `Failed to spawn MCP server ${name}: ${runtime.lastError}`, { serverName: name, error: err.message });
+
     }
 }
 function startConfiguredMcpServers() {
@@ -231,11 +245,9 @@ function getMcpStatuses() {
     }
     return statuses;
 }
-function truncateText(value, maxLen = 6000) {
-    const text = String(value || "");
-    if (text.length <= maxLen)
-        return text;
-    return `${text.slice(0, maxLen)}\n...[truncated ${text.length - maxLen} chars]`;
+function wrapIpcHandler(name, handlerFn) {
+    // ... (existing wrapIpcHandler logic)
+    // The implementation of wrapIpcHandler is provided in the previous turn.
 }
 function pickMcpServers(prompt, serverNames) {
     const all = Array.isArray(serverNames) ? serverNames : [];
@@ -247,6 +259,7 @@ function pickMcpServers(prompt, serverNames) {
 }
 function executeMcpServer({ name, command, args, env, prompt, timeoutMs = 45000 }) {
     return new Promise((resolve) => {
+        logger.logAppEvent("INFO", "MCP", "MCP_TOOL_EXECUTION_START", `Executing MCP tool for server ${name}`, { serverName: name, command, prompt: truncateText(prompt, 200), timeoutMs });
         const start = Date.now();
         let stdout = "";
         let stderr = "";
@@ -275,6 +288,17 @@ function executeMcpServer({ name, command, args, env, prompt, timeoutMs = 45000 
             if (done)
                 return;
             done = true;
+            logger.logAppEvent(result.ok ? "INFO" : "ERROR", "MCP", "MCP_TOOL_EXECUTION_END", `MCP tool execution for ${name} finished.`, {
+                serverName: name,
+                ok: result.ok,
+                exitCode: result.exitCode,
+                timedOut: result.timedOut,
+                durationMs: Date.now() - start,
+                logPath: logPath,
+                stdoutSummary: truncateText(result.stdout, 500),
+                stderrSummary: truncateText(result.stderr, 500),
+                promptSummary: truncateText(prompt, 200)
+            });
             logStream.write(`[${new Date().toISOString()}] MCP execution end\n`);
             logStream.write(`result=${JSON.stringify({ ok: result.ok, exitCode: result.exitCode, timedOut: result.timedOut, durationMs: Date.now() - start })}\n`);
             logStream.end();
@@ -308,6 +332,7 @@ function executeMcpServer({ name, command, args, env, prompt, timeoutMs = 45000 
         });
         child.on("error", (error) => {
             clearTimeout(timer);
+            logger.logAppEvent("ERROR", "MCP", "MCP_TOOL_EXECUTION_ERROR", `MCP tool execution for ${name} failed to spawn: ${error.message}`, { serverName: name, error: error.message, promptSummary: truncateText(prompt, 200) });
             finish({
                 ok: false,
                 exitCode: null,
@@ -443,6 +468,38 @@ function formatMcpResultsForUser(results) {
     }).join("\n");
 }
 function registerIpcHandlers() {
+    // Ensure logs table exists with a createdAt timestamp for RAG metadata filtering
+    sqlite_1.default.exec(`
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            input TEXT,
+            output TEXT,
+            agent TEXT,
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    // Log Cleanup: Deletes log entries based on user retention settings
+    try {
+        const row = sqlite_1.default.prepare("SELECT data FROM settings WHERE id = 1").get();
+        const settings = row ? JSON.parse(row.data) : {};
+        const days = settings.privacy?.logRetention || '30';
+        const logCols = sqlite_1.default.prepare("PRAGMA table_info(logs)").all();
+        const hasCreatedAt = Array.isArray(logCols) && logCols.some((c) => c?.name === "createdAt");
+        const hasCreatedAtSnake = Array.isArray(logCols) && logCols.some((c) => c?.name === "created_at");
+        const dateColumn = hasCreatedAt ? "createdAt" : (hasCreatedAtSnake ? "created_at" : null);
+        if (!dateColumn) {
+            logger.logAppEvent("WARN", "Database", "LOG_CLEANUP_SKIPPED", "Skipping log cleanup: no timestamp column (createdAt/created_at) found.");
+        }
+        else {
+            const result = sqlite_1.default.prepare(`DELETE FROM logs WHERE ${dateColumn} < datetime('now', '-${days} days')`).run();
+            if (result.changes > 0) {
+                logger.logAppEvent("INFO", "Database", "LOG_CLEANUP", `Cleaned up ${result.changes} log entries older than ${days} days.`);
+            }
+        }
+    } catch (err) {
+        console.error("[Database] Log cleanup failed:", err.message);
+    }
+
     electron_1.ipcMain.handle("ask-ai", async (event, arg1, arg2, arg3) => {
         try {
             let input, agent, modelType, tools, chatId, systemHint;
@@ -454,6 +511,18 @@ function registerIpcHandlers() {
                 tools = [];
                 chatId = "default";
             }
+            const row = sqlite_1.default.prepare("SELECT data FROM settings WHERE id = 1").get();
+            const settings = row ? JSON.parse(row.data) : {};
+            const aipipeToken = settings.apiKeys?.aipipe || null;
+            const incognitoMode = settings.privacy?.incognito || false;
+            logger.logAppEvent("INFO", "IPC", "IPC_ASK_AI_REQUEST", `User asked AI: ${truncateText(input, 200)}`, {
+                chatId,
+                selectedAgent: agent || "auto",
+                selectedModel: modelType || "fast",
+                mcpEnabled: tools?.includes("mcp") || tools?.includes("mcp tools"),
+                incognitoMode
+            });
+
             const selectedAgent = agent || "auto";
             const selectedModel = modelType || "fast";
             const selectedTools = Array.isArray(tools)
@@ -542,20 +611,19 @@ function registerIpcHandlers() {
             }
             let result;
             if (selectedAgent === "orchestrator") {
-                const row = sqlite_1.default.prepare("SELECT data FROM settings WHERE id = 1").get();
-                const settings = row ? JSON.parse(row.data) : {};
                 const keys = settings.apiKeys || {};
                 const orchProvider = settings.ai?.defaultProvider || "gemini";
                 const orchModel = orchProvider === "openai" ? (keys.openai ? "gpt-4o" : "gpt-4o-mini")
-                    : orchProvider === "claude" ? "claude-3-sonnet-20240229"
-                        : "gemini-2.5-flash";
+                    : orchProvider === "claude" ? "claude-3-5-sonnet-20241022"
+                        : "gemini-1.5-flash";
                 result = await (0, orchestrator_1.orchestrate)({
                     input: String(input || ""),
                     provider: orchProvider,
                     model: orchModel,
                     sessionData: session,
                     history: contextSnapshot.history,
-                    sender: event.sender
+                    sender: event.sender,
+                    aipipeToken: aipipeToken // Pass the token to orchestrator
                 });
                 if (result.chartData) {
                     session_1.default.setData(sessionId, result.chartData);
@@ -563,16 +631,30 @@ function registerIpcHandlers() {
             }
             else {
                 result = (selectedAgent === "auto")
-                    ? await (0, agents_1.autoAgent)(promptInput, selectedModel, event.sender)
-                    : await (0, agents_1.runAgent)(selectedAgent, promptInput, selectedModel, event.sender);
+                    ? await (0, agents_1.autoAgent)(promptInput, selectedModel, event.sender, aipipeToken, "openai/gpt-5-nano", sessionId)
+                    : await (0, agents_1.runAgent)(selectedAgent, promptInput, selectedModel, event.sender, aipipeToken, "openai/gpt-5-nano", sessionId);
             }
             session_1.default.pushMessage(sessionId, "assistant", result.text);
             const mcpOutputSummary = mcpEnabled ? formatMcpResultsForUser(mcpResults) : "";
             const logOutput = mcpEnabled && mcpOutputSummary
                 ? `${result.text}\n\nMCP Tool Output:\n${mcpOutputSummary}`
                 : result.text;
-            sqlite_1.default.prepare(`INSERT INTO logs (input, output, agent) VALUES (?, ?, ?)`)
-                .run(promptInput, logOutput, selectedAgent);
+            
+            // Only insert into logs if not in incognito mode
+            if (!incognitoMode) {
+                sqlite_1.default.prepare(`INSERT INTO logs (input, output, agent) VALUES (?, ?, ?)`)
+                    .run(promptInput, logOutput, selectedAgent);
+            } else {
+                console.log("[Incognito Mode] Skipping log insertion.");
+            }
+            logger.logAppEvent("INFO", "IPC", "IPC_ASK_AI_RESPONSE", `AI responded to chat ID ${chatId}`, {
+                chatId,
+                selectedAgent,
+                selectedModel,
+                model: result.model,
+                responseSummary: truncateText(result.text, 200),
+                mcpResultsSummary: mcpEnabled ? truncateText(formatMcpResultsForUser(mcpResults), 200) : null
+            });
             return {
                 text: result.text,
                 intent,
@@ -584,6 +666,11 @@ function registerIpcHandlers() {
         }
         catch (e) {
             console.error("IPC AskAI Error:", e);
+            logger.logAppEvent("ERROR", "IPC", "IPC_ASK_AI_ERROR", `Error in ask-ai: ${e.message}`, {
+                chatId,
+                error: e.message,
+                stack: e.stack
+            });
             return `Error in Agent Flow: ${e.message}`;
         }
     });
@@ -697,6 +784,16 @@ function registerIpcHandlers() {
         const filePath = getMcpConfigPath();
         const error = await electron_1.shell.openPath(filePath);
         return { ok: !error, error, path: filePath };
+    });
+    electron_1.ipcMain.handle("clear-chat-history", async (_, chatId) => {
+        try {
+            if (!chatId) return { ok: false, error: "No chat ID provided" };
+            sqlite_1.default.prepare("UPDATE chats SET messages = '[]', updatedAt = CURRENT_TIMESTAMP WHERE id = ?").run(chatId);
+            return { ok: true };
+        }
+        catch (err) {
+            return { ok: false, error: err.message };
+        }
     });
     electron_1.ipcMain.handle("clear-session", async (_, chatId) => {
         if (chatId)

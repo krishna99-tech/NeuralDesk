@@ -40,8 +40,12 @@ const electron_1 = require("electron");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
-// Resolve path (Redirected in main.js for portable builds)
-const userDataPath = electron_1.app.getPath('userData');
+// Resolve path (Redirected in main.js for portable builds when app is available)
+const appRef = electron_1?.app;
+const fallbackUserDataPath = path.join(process.env.APPDATA || process.cwd(), "neuraldesk-desktop");
+const userDataPath = (appRef && typeof appRef.getPath === "function")
+    ? appRef.getPath("userData")
+    : fallbackUserDataPath;
 const dbPath = path.join(userDataPath, 'neuraldesk.db');
 // Ensure storage directory exists
 if (!fs.existsSync(userDataPath)) {

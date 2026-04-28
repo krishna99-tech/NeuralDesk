@@ -3,10 +3,38 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://api.deepseek.com https://aipipe.org https://cdn.jsdelivr.net http://127.0.0.1:11434;">
 <title>NeuralDesk — AI Command Center</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;500;600;700&family=Fraunces:ital,wght@0,300;0,700;1,300&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="src/renderer/css/styles.css">
+<style>
+  .retry-btn-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding: 6px 12px;
+    background: rgba(139, 92, 246, 0.1);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 6px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .retry-btn-inline:hover {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+  }
+  .retry-btn-inline svg { transition: transform 0.3s ease; }
+  .retry-btn-inline:hover svg { transform: rotate(180deg); }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .retry-btn-inline.loading svg { animation: spin 1s linear infinite; }
+  .retry-btn-inline.loading { pointer-events: none; opacity: 0.7; }
+</style>
 </head>
 <body>
 
@@ -104,6 +132,7 @@
             <option value="mathTutor">Math Tutor</option>
             <option value="triage">Homework Triage</option>
             <option value="master">Master Orchestrator</option>
+            <option value="aipipeAgent">AIpipe Agent</option>
           </select>
           <div class="pill-sep"></div>
           <select id="modelTypeSelect" onchange="checkConnection()">
@@ -121,6 +150,7 @@
       </div>
 
       <div class="topbar-right">
+        <div class="topbar-btn hidden" id="incognitoIndicator" title="Incognito Mode Active">🕵️</div>
         <div class="topbar-btn" title="System Prompt" onclick="openSettings('system')">⚡</div>
         <div class="topbar-btn" title="Agent Memory" onclick="openSettings('memory')" id="memoryBtn">🧠</div>
         <div class="topbar-btn active" title="Right Panel" id="panelToggleBtn" onclick="toggleRightPanel()">◧</div>
@@ -328,7 +358,7 @@
         <!-- MEMORY TAB -->
         <div class="panel-content hidden" id="panelMemory">
           <div class="panel-section">
-            <div class="ps-header"><span class="ps-title">🧠 Agent Memory</span><span class="ps-action">Clear</span></div>
+            <div class="ps-header"><span class="ps-title">🧠 Agent Memory</span><span class="ps-action" onclick="clearChatHistory()">Clear</span></div>
             <div class="ps-body">
               <div class="memory-item">
                 <div class="memory-label">User Preference</div>
@@ -393,10 +423,11 @@
             <div class="form-row">
               <div class="form-label">Default Model</div>
               <select class="form-input form-select" id="defaultModelSelect">
+                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
                 <option value="gpt-4o-mini">GPT-4o Mini</option>
-                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gpt-4o">GPT-4o</option>
-                <option value="gpt-5.5">GPT-5.5 (Latest)</option>
+                <option value="openai/gpt-5-nano">AIpipe GPT-5 Nano</option>
+                <option value="claude-3-5-sonnet-latest">Claude 3.5 Sonnet</option>
               </select>
             </div>
             <div class="toggle-row mt-2">
@@ -469,6 +500,13 @@
                 <span class="key-toggle" onclick="toggleKeyVisibility('deepseekKey')">Show</span>
               </div>
             </div>
+            <div class="form-row">
+              <div class="form-label">AIpipe API Key</div>
+              <div class="key-input-group">
+                <input type="password" class="form-input" id="aipipeKey" placeholder="Bearer token...">
+                <span class="key-toggle" onclick="toggleKeyVisibility('aipipeKey')">Show</span>
+              </div>
+            </div>
             <div class="mt-3">
               <button class="btn btn-primary" onclick="saveSettings()">Save Keys</button>
             </div>
@@ -525,7 +563,8 @@
                 <option value="openai">OpenAI (GPT-4o)</option>
                 <option value="anthropic">Anthropic (Claude 3.5)</option>
                 <option value="deepseek">DeepSeek (V3)</option>
-                <option value="gemini">Google (Gemini 2.0)</option>
+                <option value="gemini">Google (Gemini 1.5)</option>
+                <option value="aipipe">AIpipe (OpenRouter)</option>
               </select>
             </div>
             <div class="form-row">
@@ -555,6 +594,15 @@
             <div class="ss-title">🛡️ Privacy & Safety</div>
             <div class="ss-desc">Manage your data and security preferences</div>
             <div class="ss-divider"></div>
+            <div class="form-row">
+              <div class="form-label">Log Retention Period</div>
+              <select class="form-input form-select" id="logRetentionSelect">
+                <option value="7">7 Days</option>
+                <option value="30">30 Days</option>
+                <option value="90">90 Days</option>
+              </select>
+              <small>Logs older than this will be automatically deleted on startup.</small>
+            </div>
             <div class="toggle-row">
               <div class="toggle-info">
                 <div class="toggle-label">Clear Chat on Exit</div>
