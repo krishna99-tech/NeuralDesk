@@ -1,4 +1,10 @@
 import { uiController } from './ui.js';
+const SUPPORTED_THEMES = new Set(['dark', 'light', 'cyber', 'forest', 'sunset', 'ocean', 'midnight']);
+
+function normalizeTheme(theme) {
+    const value = String(theme || '').trim().toLowerCase();
+    return SUPPORTED_THEMES.has(value) ? value : 'dark';
+}
 export class SettingsController {
     async saveSettings() {
         const systemPrompt = document.getElementById('systemPromptText')?.value || '';
@@ -7,14 +13,17 @@ export class SettingsController {
                 defaultProvider: document.getElementById('defaultProviderSelect')?.value,
                 temperature: parseFloat(document.getElementById('aiTemperature')?.value || '0.7'),
                 maxTokens: parseInt(document.getElementById('maxTokens')?.value || '4096'),
-                systemPrompt
+                systemPrompt,
+                confirmHandoff: document.getElementById('setting-confirmHandoff')?.classList.contains('on')
             },
             systemPrompt,
             ui: {
                 theme: document.getElementById('themeSelect')?.value,
+                defaultModel: document.getElementById('defaultModelSelect')?.value,
                 displayName: document.getElementById('displayName')?.value,
                 autoScroll: document.getElementById('setting-autoscroll')?.classList.contains('on'),
-                compact: document.getElementById('setting-compact')?.classList.contains('on')
+                compact: document.getElementById('setting-compact')?.classList.contains('on'),
+                autoSave: document.getElementById('setting-autosave')?.classList.contains('on')
             },
             privacy: {
                 logRetention: document.getElementById('logRetentionSelect')?.value || '30',
@@ -32,6 +41,14 @@ export class SettingsController {
                 deepseek: document.getElementById('deepseekKey')?.value,
                 aipipe: document.getElementById('aipipeKey')?.value,
             },
+            external: {
+                githubToken: document.getElementById('githubToken')?.value || '',
+                notionKey: document.getElementById('notionKey')?.value || '',
+                discordWebhook: document.getElementById('discordWebhook')?.value || '',
+                slackWebhook: document.getElementById('slackWebhook')?.value || '',
+                linearKey: document.getElementById('linearKey')?.value || '',
+                webSearchIntegration: document.getElementById('setting-webSearchIntegration')?.classList.contains('on')
+            },
             topbar: {
                 selectedAgent: document.getElementById('agentSelect')?.value || 'auto',
                 selectedModel: document.getElementById('modelTypeSelect')?.value || 'fast',
@@ -48,7 +65,7 @@ export class SettingsController {
             uiController.showToast('Settings saved successfully', 'success');
             uiController.closeSettings();
             // Apply theme
-            document.documentElement.setAttribute('data-theme', settings.ui.theme);
+            document.documentElement.setAttribute('data-theme', normalizeTheme(settings.ui.theme));
         }
         catch (err) {
             console.error(err);

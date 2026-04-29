@@ -35,6 +35,8 @@
   --border-color: var(--border);
   --text-primary: var(--text1);
   --text-secondary: var(--text2);
+  --ambient-a: rgba(124,106,255,0.06);
+  --ambient-b: rgba(34,211,238,0.04);
 }
 
 /* Artifact Overlay / Side Panel (Claude-style) */
@@ -97,6 +99,137 @@
   --text1: #1a1a2e;
   --text2: #555570;
   --text3: #9090aa;
+  --accent: #4f46e5;
+  --accent2: #0284c7;
+  --accent3: #0ea5e9;
+  --green: #16a34a;
+  --red: #dc2626;
+  --amber: #d97706;
+  --pink: #db2777;
+  --glow: 0 0 20px rgba(79,70,229,0.2);
+  --glow2: 0 0 40px rgba(14,165,233,0.12);
+  --ambient-a: rgba(79,70,229,0.08);
+  --ambient-b: rgba(14,165,233,0.06);
+}
+
+[data-theme="cyber"] {
+  --bg0: #05090d;
+  --bg1: #0a1118;
+  --bg2: #101b27;
+  --bg3: #182636;
+  --bg4: #223447;
+  --border: rgba(0,255,224,0.16);
+  --border2: rgba(0,255,224,0.3);
+  --text1: #d8fef7;
+  --text2: #7bd8cc;
+  --text3: #4ea298;
+  --accent: #00ffe0;
+  --accent2: #00b0ff;
+  --accent3: #8b5cf6;
+  --green: #22c55e;
+  --red: #f43f5e;
+  --amber: #f59e0b;
+  --pink: #ec4899;
+  --glow: 0 0 22px rgba(0,255,224,0.35);
+  --glow2: 0 0 44px rgba(0,176,255,0.18);
+  --ambient-a: rgba(0,255,224,0.1);
+  --ambient-b: rgba(0,176,255,0.09);
+}
+
+[data-theme="forest"] {
+  --bg0: #0b1210;
+  --bg1: #121b17;
+  --bg2: #18251f;
+  --bg3: #1f3028;
+  --bg4: #2a4036;
+  --border: rgba(154,230,180,0.12);
+  --border2: rgba(154,230,180,0.24);
+  --text1: #ecfdf3;
+  --text2: #b4d8c4;
+  --text3: #7ea08f;
+  --accent: #22c55e;
+  --accent2: #84cc16;
+  --accent3: #2dd4bf;
+  --green: #16a34a;
+  --red: #fb7185;
+  --amber: #fbbf24;
+  --pink: #f472b6;
+  --glow: 0 0 20px rgba(34,197,94,0.3);
+  --glow2: 0 0 40px rgba(45,212,191,0.14);
+  --ambient-a: rgba(34,197,94,0.08);
+  --ambient-b: rgba(45,212,191,0.07);
+}
+
+[data-theme="sunset"] {
+  --bg0: #1a1010;
+  --bg1: #231616;
+  --bg2: #2d1d1c;
+  --bg3: #3a2624;
+  --bg4: #4a2f2c;
+  --border: rgba(255,199,150,0.14);
+  --border2: rgba(255,199,150,0.28);
+  --text1: #fff4ea;
+  --text2: #f2c5a7;
+  --text3: #be9277;
+  --accent: #f97316;
+  --accent2: #ef4444;
+  --accent3: #f59e0b;
+  --green: #22c55e;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --pink: #fb7185;
+  --glow: 0 0 20px rgba(249,115,22,0.28);
+  --glow2: 0 0 40px rgba(239,68,68,0.14);
+  --ambient-a: rgba(249,115,22,0.1);
+  --ambient-b: rgba(245,158,11,0.08);
+}
+
+[data-theme="ocean"] {
+  --bg0: #07111a;
+  --bg1: #0d1824;
+  --bg2: #132132;
+  --bg3: #1a2b40;
+  --bg4: #213650;
+  --border: rgba(125,211,252,0.14);
+  --border2: rgba(125,211,252,0.28);
+  --text1: #e6f6ff;
+  --text2: #a4cae2;
+  --text3: #7396ad;
+  --accent: #0ea5e9;
+  --accent2: #06b6d4;
+  --accent3: #38bdf8;
+  --green: #10b981;
+  --red: #f87171;
+  --amber: #f59e0b;
+  --pink: #f472b6;
+  --glow: 0 0 20px rgba(14,165,233,0.32);
+  --glow2: 0 0 40px rgba(6,182,212,0.16);
+  --ambient-a: rgba(14,165,233,0.11);
+  --ambient-b: rgba(56,189,248,0.09);
+}
+
+[data-theme="midnight"] {
+  --bg0: #0a0717;
+  --bg1: #110d24;
+  --bg2: #191235;
+  --bg3: #241b47;
+  --bg4: #2f2459;
+  --border: rgba(167,139,250,0.15);
+  --border2: rgba(167,139,250,0.3);
+  --text1: #f2ecff;
+  --text2: #b8a9df;
+  --text3: #8478a8;
+  --accent: #8b5cf6;
+  --accent2: #6366f1;
+  --accent3: #22d3ee;
+  --green: #34d399;
+  --red: #f87171;
+  --amber: #fbbf24;
+  --pink: #f472b6;
+  --glow: 0 0 20px rgba(139,92,246,0.34);
+  --glow2: 0 0 40px rgba(99,102,241,0.16);
+  --ambient-a: rgba(139,92,246,0.1);
+  --ambient-b: rgba(34,211,238,0.08);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -117,7 +250,7 @@ body::before {
   position: fixed;
   top: -200px; left: -200px;
   width: 600px; height: 600px;
-  background: radial-gradient(circle, rgba(124,106,255,0.06) 0%, transparent 70%);
+  background: radial-gradient(circle, var(--ambient-a) 0%, transparent 70%);
   pointer-events: none;
   z-index: 0;
 }
@@ -142,7 +275,7 @@ body::after {
   position: fixed;
   bottom: -150px; right: -150px;
   width: 500px; height: 500px;
-  background: radial-gradient(circle, rgba(34,211,238,0.04) 0%, transparent 70%);
+  background: radial-gradient(circle, var(--ambient-b) 0%, transparent 70%);
   pointer-events: none;
   z-index: 0;
 }

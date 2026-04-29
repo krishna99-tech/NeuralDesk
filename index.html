@@ -151,8 +151,8 @@
 
       <div class="topbar-right">
         <div class="topbar-btn hidden" id="incognitoIndicator" title="Incognito Mode Active">🕵️</div>
-        <div class="topbar-btn" title="System Prompt" onclick="openSettings('system')">⚡</div>
-        <div class="topbar-btn" title="Agent Memory" onclick="openSettings('memory')" id="memoryBtn">🧠</div>
+        <div class="topbar-btn" title="System Prompt" onclick="openSettings('agents')">⚡</div>
+        <div class="topbar-btn" title="Agent Memory" onclick="openMemoryPanel()" id="memoryBtn">🧠</div>
         <div class="topbar-btn active" title="Right Panel" id="panelToggleBtn" onclick="toggleRightPanel()">◧</div>
         <div class="topbar-btn" title="New Chat" onclick="newChat()">✦</div>
         <div class="topbar-btn" title="Settings" onclick="openSettings('general')">⚙</div>
@@ -418,6 +418,10 @@
                 <option value="dark">Pro Dark (Neural)</option>
                 <option value="light">Solar Light</option>
                 <option value="cyber">Cyberpunk</option>
+                <option value="forest">Forest Terminal</option>
+                <option value="sunset">Sunset Glass</option>
+                <option value="ocean">Oceanic Blue</option>
+                <option value="midnight">Midnight Indigo</option>
               </select>
             </div>
             <div class="form-row">
@@ -659,7 +663,7 @@
                 <div class="toggle-label">Enable Web Search Integration</div>
                 <div class="toggle-desc">Allow agents to use Tavily/Serper for real-time data</div>
               </div>
-              <div class="param-toggle on"></div>
+              <div class="param-toggle on" id="setting-webSearchIntegration" onclick="toggleSetting('webSearchIntegration')"></div>
             </div>
 
             <div class="mt-3">

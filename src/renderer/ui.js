@@ -26,6 +26,11 @@ export class UIController {
             this.settingsModal.classList.remove('open');
     }
     switchSettingsPane(paneId, el) {
+        const paneMap = {
+            system: 'agents',
+            memory: 'privacy'
+        };
+        const resolvedPaneId = paneMap[paneId] || paneId;
         // Update sidebar active state
         const items = document.querySelectorAll('.msidebar-item');
         items.forEach(item => item.classList.remove('active'));
@@ -33,7 +38,7 @@ export class UIController {
             el.classList.add('active');
         }
         else {
-            const target = document.querySelector(`.msidebar-item[data-pane="${paneId}"]`);
+            const target = document.querySelector(`.msidebar-item[data-pane="${resolvedPaneId}"]`);
             if (target)
                 target.classList.add('active');
         }
@@ -41,17 +46,19 @@ export class UIController {
         const panes = document.querySelectorAll('.settings-pane');
         panes.forEach(p => p.classList.add('hidden'));
         
-        const targetPane = document.getElementById(`pane-${paneId}`);
+        const targetPane = document.getElementById(`pane-${resolvedPaneId}`);
         if (targetPane)
             targetPane.classList.remove('hidden');
         else
-            console.error(`Settings pane not found for ID: pane-${paneId}`);
+            console.error(`Settings pane not found for ID: pane-${resolvedPaneId}`);
     }
     switchPanelTab(tabId, el = null) {
         const tabs = document.querySelectorAll('.panel-tab');
         tabs.forEach(t => t.classList.remove('active'));
         
-        const targetTab = el || document.querySelector(`.panel-tab[data-tab="${tabId}"]`);
+        const targetTab = el
+            || document.querySelector(`.panel-tab[data-tab="${tabId}"]`)
+            || document.querySelector(`.panel-tab[onclick*="'${tabId}'"]`);
         if (targetTab)
             targetTab.classList.add('active');
         

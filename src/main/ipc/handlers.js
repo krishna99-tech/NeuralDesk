@@ -556,33 +556,34 @@ function registerIpcHandlers() {
             }
             const { intent } = (0, intentParser_1.parseIntent)(userInput);
             session.lastIntent = intent;
-            if (intent === "predict") {
-                let data = session.data;
-                if (!data.length)
-                    data = (0, dataService_1.generateData)();
-                const predicted = (0, dataService_1.predictNext)(data, 10);
-                const combined = [...data, ...predicted];
-                session_1.default.setData(sessionId, combined);
-                session_1.default.pushMessage(sessionId, "assistant", "Prediction completed.");
-                return {
-                    text: "Here is the prediction based on your current data trend.",
-                    intent: "predict",
-                    chartData: combined,
-                    model: "data-service",
-                    mcpResults: []
-                };
+            if (intent === "predict" && !mcpEnabled) {
+                const data = Array.isArray(session.data) ? session.data : [];
+                if (data.length) {
+                    const predicted = (0, dataService_1.predictNext)(data, 10);
+                    const combined = [...data, ...predicted];
+                    session_1.default.setData(sessionId, combined);
+                    session_1.default.pushMessage(sessionId, "assistant", "Prediction completed.");
+                    return {
+                        text: "Here is the prediction based on your current data trend.",
+                        intent: "predict",
+                        chartData: combined,
+                        model: "data-service",
+                        mcpResults: []
+                    };
+                }
             }
-            if (intent === "plot") {
-                const data = (0, dataService_1.generateData)();
-                session_1.default.setData(sessionId, data);
-                session_1.default.pushMessage(sessionId, "assistant", "Data plotted.");
-                return {
-                    text: "Here is your data plotted.",
-                    intent: "plot",
-                    chartData: data,
-                    model: "data-service",
-                    mcpResults: []
-                };
+            if (intent === "plot" && !mcpEnabled) {
+                const data = Array.isArray(session.data) ? session.data : [];
+                if (data.length) {
+                    session_1.default.pushMessage(sessionId, "assistant", "Data plotted.");
+                    return {
+                        text: "Here is your data plotted.",
+                        intent: "plot",
+                        chartData: data,
+                        model: "data-service",
+                        mcpResults: []
+                    };
+                }
             }
             const promptInput = userInput;
             let mcpResults = [];
@@ -642,7 +643,7 @@ function registerIpcHandlers() {
             return {
                 text: result.text,
                 intent,
-                chartData: result.chartData || (session.data.length ? session.data : null),
+                chartData: result.chartData || ((intent === "plot" || intent === "predict") && session.data.length ? session.data : null),
                 steps: result.steps || null,
                 mcpResults: mcpEnabled ? mcpResults : [],
                 model: result.model

@@ -10,6 +10,12 @@ import { getProviderForAgent } from './agentProvider.js';
 // Cached list for validation during save
 let CACHED_MODELS = {};
 let IS_BROWSER_FALLBACK = false;
+const SUPPORTED_THEMES = new Set(['dark', 'light', 'cyber', 'forest', 'sunset', 'ocean', 'midnight']);
+
+function normalizeTheme(theme) {
+    const value = String(theme || '').trim().toLowerCase();
+    return SUPPORTED_THEMES.has(value) ? value : 'dark';
+}
 
 function createBrowserFallbackApi() {
     const storagePrefix = 'nd_store_';
@@ -243,14 +249,19 @@ async function applySettingsToUI(settings) {
     const ui = settings.ui || {};
     const endpoints = settings.endpoints || {};
     const privacy = settings.privacy || {};
+    const external = settings.external || {};
     setInputValue('defaultProviderSelect', ai.defaultProvider);
     setInputValue('aiTemperature', ai.temperature);
     setInputValue('maxTokens', ai.maxTokens);
     setInputValue('systemPromptText', ai.systemPrompt || settings.systemPrompt || '');
-    setInputValue('themeSelect', ui.theme);
+    const normalizedTheme = normalizeTheme(ui.theme);
+    setInputValue('themeSelect', normalizedTheme);
+    setInputValue('defaultModelSelect', ui.defaultModel || 'gemini-1.5-flash');
     setInputValue('displayName', ui.displayName);
     setToggleState('autoscroll', ui.autoScroll);
     setToggleState('compact', ui.compact);
+    setToggleState('autosave', ui.autoSave !== false);
+    setToggleState('confirmHandoff', ai.confirmHandoff);
     // Ensure privacy settings are loaded and applied
     setInputValue('logRetentionSelect', privacy.logRetention || '30');
     setToggleState('clearOnExit', privacy.clearOnExit);
@@ -263,6 +274,12 @@ async function applySettingsToUI(settings) {
     setInputValue('aipipeKey', apiKeys.aipipe);
     setInputValue('customBaseUrl', endpoints.openaiCompatibleBaseUrl);
     setInputValue('ollamaBaseUrl', endpoints.ollamaBaseUrl);
+    setInputValue('githubToken', external.githubToken);
+    setInputValue('notionKey', external.notionKey);
+    setInputValue('discordWebhook', external.discordWebhook);
+    setInputValue('slackWebhook', external.slackWebhook);
+    setInputValue('linearKey', external.linearKey);
+    setToggleState('webSearchIntegration', external.webSearchIntegration !== false);
     applyTopbarState(settings.topbar || {});
     renderKeysPanel(settings);
     updateModelTooltip();
@@ -271,9 +288,7 @@ async function applySettingsToUI(settings) {
     if (tempVal && tempInput) {
         tempVal.textContent = tempInput.value || '0.7';
     }
-    if (ui.theme) {
-        document.documentElement.setAttribute('data-theme', ui.theme);
-    }
+    document.documentElement.setAttribute('data-theme', normalizedTheme);
 }
 function parseEnvText(text) {
     const env = {};
@@ -477,6 +492,15 @@ window.continueAsGuest = () => {
         nameEl.textContent = 'Guest';
 };
 window.openSettings = (pane) => uiController.openSettings(pane);
+window.openMemoryPanel = () => {
+    const panel = document.getElementById('rightPanel');
+    const toggleBtn = document.getElementById('panelToggleBtn');
+    if (panel?.classList.contains('collapsed')) {
+        panel.classList.remove('collapsed');
+        toggleBtn?.classList.add('active');
+    }
+    uiController.switchPanelTab('memory');
+};
 window.closeSettings = () => uiController.closeSettings();
 window.switchSettingsPane = (pane, el) => uiController.switchSettingsPane(pane, el);
 window.showToast = (msg, type) => uiController.showToast(msg, type);
