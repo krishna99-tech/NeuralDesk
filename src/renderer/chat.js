@@ -1,4 +1,4 @@
-﻿const DEFAULT_PROMPTS = {
+const DEFAULT_PROMPTS = {
   all: [
     { icon: '*', label: 'Explain this concept', text: 'Explain this concept in simple terms: ' },
     { icon: '*', label: 'Debug my code', text: 'Debug the following code and explain what is wrong:\n\n' },
@@ -66,8 +66,13 @@ export class ChatController {
   getCurrentModelType() { return document.getElementById('modelTypeSelect')?.value || 'smart'; }
 
   getActiveToolsFromUI() {
+    const normalizeToolName = (value) => String(value || '')
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, ' ')
+      .replace(/\s+/g, '_')
+      .replace(/^_+|_+$/g, '');
     return Array.from(document.querySelectorAll('.tool-btn.active, .btn-tool.active, .toolbar-btn.active, [data-tool].active'))
-      .map(btn => btn.getAttribute('data-tool') || btn.textContent?.trim().toLowerCase().replace(/\s+/g, '_'))
+      .map((btn) => normalizeToolName(btn.getAttribute('data-tool') || btn.textContent?.trim()))
       .filter(Boolean);
   }
 
@@ -192,6 +197,22 @@ export class ChatController {
     this.renderUsageAnalytics();
   }
 
+  formatErrorForDisplay(raw) {
+    const text = String(raw || '');
+    const quotaMatch = text.match(/Please retry in\s+([0-9.]+)s/i);
+    const retrySec = quotaMatch ? Math.max(1, Math.round(Number(quotaMatch[1] || 0))) : null;
+    if (/quota exceeded|too many requests|status code 429/i.test(text)) {
+      const retryLine = retrySec ? `\nRetry after about ${retrySec}s.` : '';
+      return `Rate limit reached for the selected provider/model.${retryLine}\nTip: switch provider/model or wait and retry.`;
+    }
+    if (/status code 401|invalid|api key|bearer token/i.test(text)) {
+      return 'Authentication failed for the selected provider. Check API key/token in Settings and retry.';
+    }
+    const compact = text.replace(/\s+/g, ' ').trim();
+    const maxLen = 700;
+    return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact;
+  }
+
   addMessage(role, content, opts = {}) {
     const welcomeScreen = document.getElementById('welcomeScreen');
     if (welcomeScreen) welcomeScreen.remove();
@@ -224,6 +245,7 @@ export class ChatController {
     const msgContent = document.createElement('div');
     if (opts.id) msgContent.id = opts.id;
     if (opts.streaming) msgContent.className = 'streaming-cursor';
+    if (opts.isError) msgContent.classList.add('error-content');
 
     if (window.renderer) window.renderer.render(content, msgContent, { skipHighlight: opts.skipHighlight });
     else msgContent.textContent = content;
@@ -244,7 +266,51 @@ export class ChatController {
     return msgContent;
   }
 
+  async streamAssistantMessage(content, opts = {}) {
+    const msgEl = this.addMessage('assistant', '', { ...opts, streaming: true, skipHighlight: true });
+    if (!msgEl) return;
+    const fullText = String(content || '');
+    const isLong = fullText.length > 1800;
+    const step = isLong ? 40 : 16;
+    for (let i = 0; i < fullText.length; i += step) {
+      msgEl.textContent = fullText.slice(0, i + step);
+      if (this.messagesContainer) {
+        this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 12));
+    }
+    msgEl.classList.remove('streaming-cursor');
+    if (window.renderer) window.renderer.render(fullText, msgEl, { skipHighlight: false });
+    else msgEl.textContent = fullText;
+  }
+
   buildSystemHint() { return ''; }
+
+  buildInlineChartMarkup(chartData) {
+    if (!Array.isArray(chartData) || chartData.length === 0) return '';
+    const points = chartData
+      .map((item, index) => {
+        if (typeof item === 'number') return { x: index + 1, y: item };
+        if (item && typeof item === 'object') {
+          const y = Number(item.y ?? item.value ?? item.count ?? item.temp ?? item.temperature ?? item.v);
+          const x = item.x ?? item.label ?? item.time ?? item.timestamp ?? (index + 1);
+          if (Number.isFinite(y)) return { x, y };
+        }
+        return null;
+      })
+      .filter(Boolean);
+    if (!points.length) return '';
+    const max = Math.max(...points.map(p => p.y), 1);
+    const bars = points
+      .slice(0, 48)
+      .map(p => {
+        const h = Math.max(4, Math.round((p.y / max) * 60));
+        const label = String(p.x).replace(/"/g, '&quot;');
+        return `<div class="chart-bar" style="height:${h}px" title="${label}: ${p.y}"></div>`;
+      })
+      .join('');
+    return `\n<div class="mt-2"><div class="mini-chart">${bars}</div></div>`;
+  }
 
   async requestAgentResponse(input, tools = [], overrides = {}) {
     const requestStartedAt = Date.now();
@@ -258,7 +324,28 @@ export class ChatController {
     const agent = overrides.agent || this.getCurrentAgent();
     const modelType = overrides.model || this.getCurrentModelType();
 
+    // Create a loading bubble
+    const loadingMsgEl = this.addMessage('assistant', '<div style="display:flex;align-items:center;gap:8px;"><div style="width:14px;height:14px;border:2px solid var(--text-muted);border-top-color:var(--accent-color);border-radius:50%;animation:spin 1s linear infinite;"></div><span>Thinking...</span></div><style>@keyframes spin { to { transform: rotate(360deg); } }</style>', { skipHighlight: true, model: modelType });
+
+    let streamUnsub = null;
+    const streamState = { el: null, buffer: '' };
     try {
+      if (window.electronAPI?.onAIStream) {
+        streamUnsub = window.electronAPI.onAIStream((event) => {
+          if (!event || event.chatId !== window.state.currentChatId) return;
+          if (event.type === 'token') {
+            if (loadingMsgEl && loadingMsgEl.closest('.message-row')) {
+              loadingMsgEl.closest('.message-row').remove();
+            }
+            if (!streamState.el) {
+              streamState.el = this.addMessage('assistant', '', { model: modelType, skipHighlight: true, streaming: true });
+            }
+            streamState.buffer += String(event.token || '');
+            streamState.el.textContent = streamState.buffer;
+            if (this.messagesContainer) this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+          }
+        });
+      }
       const response = await window.electronAPI.askAI({
         input,
         chatId: window.state.currentChatId,
@@ -270,14 +357,24 @@ export class ChatController {
         aipipeToken: window.aipipeToken || null,
       });
 
+      if (loadingMsgEl && loadingMsgEl.closest('.message-row')) {
+        loadingMsgEl.closest('.message-row').remove();
+      }
+
       if (typeof response === 'string' && response.startsWith('Error')) {
-        this.addMessage('assistant', response, { isError: true });
+        this.addMessage('assistant', this.formatErrorForDisplay(response), { isError: true });
         this.usageMetrics.status = 'error';
         return;
       }
 
-      const finalOutput = response?.text || '';
-      this.addMessage('assistant', finalOutput, { model: response.model, mcpResults: response.mcpResults });
+      const finalOutput = `${response?.text || ''}${this.buildInlineChartMarkup(response?.chartData)}`;
+      if (streamState.el) {
+        streamState.el.classList.remove('streaming-cursor');
+        if (window.renderer) window.renderer.render(finalOutput, streamState.el, { skipHighlight: false });
+        else streamState.el.textContent = finalOutput;
+      } else {
+        this.addMessage('assistant', finalOutput, { model: response.model, mcpResults: response.mcpResults });
+      }
       this.usageMetrics.model = response?.model || this.getCurrentModelType() || 'n/a';
       this.usageMetrics.latencyMs = Date.now() - requestStartedAt;
       this.usageMetrics.status = 'ok';
@@ -285,15 +382,19 @@ export class ChatController {
       window.state.messages.push({ role: 'assistant', content: finalOutput });
       this.syncCurrentChatRecord();
     } catch (error) {
+      if (loadingMsgEl && loadingMsgEl.closest('.message-row')) {
+        loadingMsgEl.closest('.message-row').remove();
+      }
       if (error?.name === 'AbortError') {
         this.addMessage('assistant', '_Generation stopped._');
         this.usageMetrics.status = 'stopped';
       } else {
         console.error('Chat Error:', error);
-        this.addMessage('assistant', `Error: ${error instanceof Error ? error.message : String(error)}`, { isError: true });
+        this.addMessage('assistant', this.formatErrorForDisplay(error instanceof Error ? error.message : String(error)), { isError: true });
         this.usageMetrics.status = 'error';
       }
     } finally {
+      if (typeof streamUnsub === 'function') streamUnsub();
       window.streamState.isGenerating = false;
       this.abortController = null;
       this.toggleLoading(false);

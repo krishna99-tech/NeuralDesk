@@ -21,11 +21,11 @@ const MODELS = {
         }
     },
     gemini: {
-        fast: "gemini-1.5-flash",
-        smart: "gemini-1.5-pro",
+        fast: "gemini-2.0-flash",
+        smart: "gemini-2.5-flash",
         metadata: {
-            "gemini-1.5-flash": { limit: "1M", price: "Free/Low" },
-            "gemini-1.5-pro": { limit: "2M", price: "$3.50/1M" }
+            "gemini-2.0-flash": { limit: "1M", price: "Free/Low" },
+            "gemini-2.5-flash": { limit: "1M", price: "Low" }
         }
     },
     ollama: {

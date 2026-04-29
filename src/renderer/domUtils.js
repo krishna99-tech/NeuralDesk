@@ -1,6 +1,11 @@
 export function collectActiveTools() {
+    const normalizeToolName = (value) => String(value || '')
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, ' ')
+        .replace(/\s+/g, '_')
+        .replace(/^_+|_+$/g, '');
     return Array.from(document.querySelectorAll('.tool-btn.active, .btn-tool.active, .toolbar-btn.active, [data-tool].active'))
-        .map(btn => btn.getAttribute('data-tool') || btn.textContent?.trim().toLowerCase().replace(/\s+/g, '_'))
+        .map((btn) => normalizeToolName(btn.getAttribute('data-tool') || btn.textContent?.trim()))
         .filter(Boolean);
 }
 

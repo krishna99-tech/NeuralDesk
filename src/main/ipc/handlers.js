@@ -181,10 +181,10 @@ function startMcpServer(name, server) {
         runtime.status = "running";
         logStream.write(`[${new Date().toISOString()}] process spawned pid=${child.pid}\n`);
         child.stdout.on("data", (chunk) => {
-            logStream.write(`[stdout] ${chunk.toString()}`); // Full stdout to file
+            logStream.write(`[stdout] ${chunk.toString()}`);
         });
         child.stderr.on("data", (chunk) => {
-            logStream.write(`[stderr] ${chunk.toString()}`); // Full stderr to file
+            logStream.write(`[stderr] ${chunk.toString()}`);
         });
         child.on("error", (err) => {
             runtime.status = "error";
@@ -201,11 +201,10 @@ function startMcpServer(name, server) {
             logStream.write(`[${new Date().toISOString()}] closed exitCode=${code}\n`);
             logStream.end();
         });
-        // Initialize persistent client for tool access
         const mcpClient = new client_1.default(name, command, args, env);
         mcpClient.connect().then(ok => {
             if (ok)
-                registry_1.activeClients.set(name, mcpClient); // This is where the client is actually registered
+                registry_1.activeClients.set(name, mcpClient);
             logger.logAppEvent(ok ? "INFO" : "WARN", "MCP", "MCP_CLIENT_CONNECTED", `MCP client for ${name} connection status: ${ok ? 'success' : 'failed'}`, { serverName: name, connected: ok });
         });
     }
@@ -213,7 +212,6 @@ function startMcpServer(name, server) {
         runtime.status = "error";
         runtime.lastError = String(err?.message || "Failed to spawn MCP server.");
         logger.logAppEvent("ERROR", "MCP", "MCP_SERVER_SPAWN_FAILED", `Failed to spawn MCP server ${name}: ${runtime.lastError}`, { serverName: name, error: err.message });
-
     }
 }
 function startConfiguredMcpServers() {
@@ -246,8 +244,14 @@ function getMcpStatuses() {
     return statuses;
 }
 function wrapIpcHandler(name, handlerFn) {
-    // ... (existing wrapIpcHandler logic)
-    // The implementation of wrapIpcHandler is provided in the previous turn.
+    return async (event, ...args) => {
+        try {
+            return await handlerFn(event, ...args);
+        } catch (err) {
+            logger.logAppEvent("ERROR", "IPC", `IPC_HANDLER_ERROR_${name.toUpperCase()}`, `Unhandled error in IPC handler '${name}': ${err.message}`, { handler: name, error: err.message, stack: err.stack });
+            return { ok: false, error: err.message };
+        }
+    };
 }
 function pickMcpServers(prompt, serverNames) {
     const all = Array.isArray(serverNames) ? serverNames : [];
@@ -467,8 +471,11 @@ function formatMcpResultsForUser(results) {
         return parts.join("\n");
     }).join("\n");
 }
+function isGreetingInput(raw) {
+    const text = String(raw || "").trim().toLowerCase();
+    return /^(hi|hello|hey|yo|sup|good morning|good afternoon|good evening|hola)\b[!.?]*$/.test(text);
+}
 function registerIpcHandlers() {
-    // Ensure logs table exists with a createdAt timestamp for RAG metadata filtering
     sqlite_1.default.exec(`
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -478,7 +485,6 @@ function registerIpcHandlers() {
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     `);
-    // Log Cleanup: Deletes log entries based on user retention settings
     try {
         const row = sqlite_1.default.prepare("SELECT data FROM settings WHERE id = 1").get();
         const settings = row ? JSON.parse(row.data) : {};
@@ -501,8 +507,9 @@ function registerIpcHandlers() {
     }
 
     electron_1.ipcMain.handle("ask-ai", async (event, arg1, arg2, arg3) => {
+        let chatId = "default";
         try {
-            let input, agent, modelType, tools, chatId, systemHint;
+            let input, agent, modelType, tools, systemHint;
             if (typeof arg1 === "object" && arg1 !== null) {
                 ({ input, agent, modelType, tools, chatId, systemHint } = arg1);
             }
@@ -515,24 +522,39 @@ function registerIpcHandlers() {
             const settings = row ? JSON.parse(row.data) : {};
             const aipipeToken = settings.apiKeys?.aipipe || null;
             const incognitoMode = settings.privacy?.incognito || false;
+            const rawTools = Array.isArray(tools) ? tools : [];
+            const normalizedTools = rawTools
+                .map(t => String(t || "").trim().toLowerCase())
+                .filter(Boolean);
+            const mcpEnabledFromTools = normalizedTools.some(t => t === "mcp" || t === "mcp tools" || t === "mcp_tools" || t.includes("mcp"));
             logger.logAppEvent("INFO", "IPC", "IPC_ASK_AI_REQUEST", `User asked AI: ${truncateText(input, 200)}`, {
                 chatId,
                 selectedAgent: agent || "auto",
                 selectedModel: modelType || "fast",
-                mcpEnabled: tools?.includes("mcp") || tools?.includes("mcp tools"),
+                mcpEnabled: mcpEnabledFromTools,
                 incognitoMode
             });
 
             const selectedAgent = agent || "auto";
             const selectedModel = modelType || "fast";
-            const selectedTools = Array.isArray(tools)
-                ? tools.map(t => String(t || "").trim().toLowerCase()).filter(Boolean)
-                : [];
-            const mcpEnabled = selectedTools.includes("mcp") || selectedTools.includes("mcp tools");
+            const selectedTools = normalizedTools;
+            const mcpEnabled = mcpEnabledFromTools;
             const sessionId = chatId || "default";
             const session = session_1.default.getSession(sessionId);
-            session_1.default.pushMessage(sessionId, "user", String(input || ""));
-            const { intent } = (0, intentParser_1.parseIntent)(input);
+            const userInput = String(input || "");
+            session_1.default.pushMessage(sessionId, "user", userInput);
+            if (isGreetingInput(userInput)) {
+                const greetingText = "Hi there! How can I help?";
+                session_1.default.pushMessage(sessionId, "assistant", greetingText);
+                return {
+                    text: greetingText,
+                    intent: "greeting",
+                    chartData: session.data.length ? session.data : null,
+                    model: selectedModel,
+                    mcpResults: []
+                };
+            }
+            const { intent } = (0, intentParser_1.parseIntent)(userInput);
             session.lastIntent = intent;
             if (intent === "predict") {
                 let data = session.data;
@@ -562,10 +584,7 @@ function registerIpcHandlers() {
                     mcpResults: []
                 };
             }
-            let promptInput = String(input || "");
-            if (systemHint) {
-                promptInput = `System Hint: ${systemHint}\n\n${promptInput}`;
-            }
+            const promptInput = userInput;
             let mcpResults = [];
             if (mcpEnabled) {
                 mcpResults = await executeMcpForPrompt(promptInput);
@@ -574,43 +593,9 @@ function registerIpcHandlers() {
                         session_1.default.cacheMcpResult(sessionId, r.name, r.stdout);
                 });
             }
-            const contextSnapshot = session_1.default.getContextSnapshot(sessionId);
-            const historyContext = contextSnapshot.history.slice(-10)
-                .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-                .join("\n");
-            if (selectedTools.length > 0) {
-                const toolLines = [];
-                toolLines.push(`Active tools: ${selectedTools.join(", ")}`);
-                if (mcpEnabled) {
-                    const cfg = readMcpConfig();
-                    const serverNames = Object.keys(cfg.mcpServers || {});
-                    toolLines.push(serverNames.length > 0
-                        ? `Available MCP servers: ${serverNames.join(", ")}`
-                        : "Available MCP servers: none configured");
-                    const allMcpTools = (0, registry_1.getAllTools)();
-                    if (allMcpTools.length > 0) {
-                        toolLines.push("Available MCP Tools (Callable via tool_use):");
-                        allMcpTools.forEach((t) => {
-                            toolLines.push(`- mcp_${t.serverName}_${t.name}: ${t.description || "No description"}`);
-                        });
-                    }
-                    if (mcpResults.length > 0) {
-                        toolLines.push(`MCP execution output:\n${formatMcpResultsForPrompt(mcpResults)}`);
-                    }
-                }
-                toolLines.push("Tool usage guidance: Use only the selected tools when useful.");
-                if (historyContext) {
-                    promptInput = `Conversation History:\n${historyContext}\n\n${toolLines.join("\n")}\n\nUser request:\n${promptInput}`;
-                }
-                else {
-                    promptInput = `${toolLines.join("\n")}\n\nUser request:\n${promptInput}`;
-                }
-            }
-            else if (historyContext) {
-                promptInput = `Conversation History:\n${historyContext}\n\nUser request:\n${promptInput}`;
-            }
             let result;
             if (selectedAgent === "orchestrator") {
+                const contextSnapshot = session_1.default.getContextSnapshot(sessionId);
                 const keys = settings.apiKeys || {};
                 const orchProvider = settings.ai?.defaultProvider || "gemini";
                 const orchModel = orchProvider === "openai" ? (keys.openai ? "gpt-4o" : "gpt-4o-mini")
@@ -623,7 +608,7 @@ function registerIpcHandlers() {
                     sessionData: session,
                     history: contextSnapshot.history,
                     sender: event.sender,
-                    aipipeToken: aipipeToken // Pass the token to orchestrator
+                    aipipeToken: aipipeToken
                 });
                 if (result.chartData) {
                     session_1.default.setData(sessionId, result.chartData);
@@ -640,10 +625,9 @@ function registerIpcHandlers() {
                 ? `${result.text}\n\nMCP Tool Output:\n${mcpOutputSummary}`
                 : result.text;
             
-            // Only insert into logs if not in incognito mode
             if (!incognitoMode) {
                 sqlite_1.default.prepare(`INSERT INTO logs (input, output, agent) VALUES (?, ?, ?)`)
-                    .run(promptInput, logOutput, selectedAgent);
+                    .run(userInput, logOutput, selectedAgent);
             } else {
                 console.log("[Incognito Mode] Skipping log insertion.");
             }
@@ -700,7 +684,7 @@ function registerIpcHandlers() {
         return { ok: true };
     });
     electron_1.ipcMain.handle("check-session", async () => {
-        return { ok: true }; // Stateless for now, handled by localStorage in renderer
+        return { ok: true };
     });
     electron_1.ipcMain.handle("get-data-key", async (_, key) => {
         if (key === "chatHistory") {

@@ -9,8 +9,9 @@ const claude_1 = __importDefault(require("./claude"));
 const gemini_1 = __importDefault(require("./gemini"));
 const ollama_1 = __importDefault(require("./ollama"));
 const deepseek_1 = __importDefault(require("./deepseek"));
+const aipipe_1 = __importDefault(require("./aipipe"));
 const sqlite_1 = __importDefault(require("../db/sqlite"));
-async function callAI({ provider, model, prompt, tools }) {
+async function callAI({ provider, model, prompt, tools, aipipeToken }) {
     // Fetch real-time settings from DB
     const row = sqlite_1.default.prepare("SELECT data FROM settings WHERE id = 1").get();
     const settings = row ? JSON.parse(row.data) : {};
@@ -43,6 +44,9 @@ async function callAI({ provider, model, prompt, tools }) {
     }
     if (provider === "ollama") {
         return (0, ollama_1.default)({ ...options, baseUrl: endpoints.ollamaBaseUrl });
+    }
+    if (provider === "aipipe") {
+        return (0, aipipe_1.default)({ ...options, aipipeToken: aipipeToken || keys.aipipe });
     }
     throw new Error(`Invalid provider: ${provider}`);
 }

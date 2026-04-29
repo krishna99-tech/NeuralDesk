@@ -108,7 +108,14 @@ exports.agents = {
     analyzer: {
         provider: "gemini",
         modelType: "fast",
-        prompt: (i) => `Analyze the following input and provide a concise summary:\n${i}`
+        prompt: (i) => `Analyze the following input and provide a concise summary. 
+If you are analyzing database structures, collections, or query results, ALWAYS format the data using artifact tables:
+\`\`\`artifact:table title="Your Title"\`\`\`
+For numeric trends, use:
+\`\`\`artifact:chart title="Your Title"\`\`\`
+
+User request:
+${i}`
     },
     reasoner: {
         provider: "claude",
@@ -121,6 +128,11 @@ exports.agents = {
         prompt: (i) => `You are a helpful assistant. Answer the user's request directly in clear, concise language.
 Do not describe your internal reasoning process, channels, or methodology.
 Avoid section-heavy or overly verbose formatting unless the user asks for it.
+
+PRESENTATION RULES:
+- If you retrieve structured data, use \`\`\`artifact:table title="..."\`\`\` with JSON rows.
+- If you retrieve numeric/time-series data, use \`\`\`artifact:chart title="..."\`\`\` with JSON data.
+- Keep a short summary before the artifact.
 
 User request:
 ${i}`
@@ -241,6 +253,12 @@ Always strive for the most accurate and helpful response.`,
         provider: "aipipe",
         modelType: "fast", // Assuming gpt-5-nano is fast
         prompt: (i) => `You are a helpful assistant powered by AIpipe's OpenAI/GPT-5 Nano model. Answer the user's request directly in clear, concise language.
+
+PRESENTATION RULES:
+- If you retrieve structured data, use \`\`\`artifact:table title="..."\`\`\` with JSON rows.
+- If data has trends or metrics, use \`\`\`artifact:chart title="..."\`\`\` with JSON data.
+- Keep a short summary before artifacts.
+
 User request:
 ${i}`
         
@@ -295,15 +313,16 @@ async function runAgent(name, input, overrideType, sender, aipipeToken, aipipeMo
             provider = "openai";
         const model = getModel(provider, modelType || agentConfig.modelType);
 
-        // Use LangChain Bridge for all compatible cloud providers
-        if (provider === "openai" || provider === "gemini" || provider === "ollama") {
+        // Use LangChain bridge for selected providers and models.
+        if (provider === "openai" || provider === "deepseek" || provider === "aipipe") {
             return await (0, langchain_1.runLangChainAgent)({
                 input,
                 provider,
                 model: model,
                 agentConfig: agentConfig,
                 sender,
-                chatId
+                chatId,
+                aipipeToken
             });
         }
 
@@ -497,7 +516,7 @@ async function autoAgent(input, preferredType = "fast", sender, aipipeToken, aip
     if (query.includes("analyze") || query.includes("data") || query.includes("viz")) {
         return runAgent("geminiAgent", input, type, sender, aipipeToken, aipipeModel, chatId);
     }
-    if (query.length > 300 || query.includes("plan") || query.includes("orchestrate") || query.includes("complex")) {
+    if (query.length > 300 || query.includes("plan") || query.includes("orchestrate") || query.includes("complex") || query.includes("mongodb") || query.includes("mongodbanalyzer")) {
         return runAgent("master", input, "smart", sender, aipipeToken, aipipeModel, chatId);
     }
     return runAgent("analyzer", input, type, sender, aipipeToken, aipipeModel, chatId);

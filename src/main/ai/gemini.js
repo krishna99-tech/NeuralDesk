@@ -10,7 +10,13 @@ const { sanitizeSchema } = require("../utils/schema");
 exports.default = async ({ prompt, model, apiKey, systemPrompt, temperature, maxTokens, tools }) => {
     if (!apiKey)
         throw new Error("Google Gemini API Key is missing. Please configure it in Settings.");
-    const requestedModel = model || "gemini-1.5-flash";
+    const requestedModel = model || "gemini-2.0-flash";
+    const fallbackModels = [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash-001",
+        "gemini-1.5-flash"
+    ];
     logAppEvent("INFO", "Gemini", "GEMINI_REQUEST", `Sending request to model: ${requestedModel}`, { model: requestedModel });
     const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
 
@@ -67,15 +73,25 @@ exports.default = async ({ prompt, model, apiKey, systemPrompt, temperature, max
         const isModelNotFound = (err && err.status === 404) ||
             (typeof err?.message === "string" &&
                 err.message.toLowerCase().includes("is not found"));
-        if (isModelNotFound && requestedModel !== "gemini-1.5-flash") {
-            logAppEvent("WARN", "Gemini", "GEMINI_FALLBACK", `Model '${requestedModel}' not found. Attempting fallback to gemini-1.5-flash.`);
-            const fallback = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-            const retry = await fallback.generateContent(prompt);
-            return { text: retry.response.text(), model: "gemini-1.5-flash" };
-        }
         if (isModelNotFound) {
-            logAppEvent("ERROR", "Gemini", "GEMINI_MODEL_ERROR", `Model '${requestedModel}' is unavailable.`);
-            throw new Error(`Gemini model '${requestedModel}' is unavailable. Try 'gemini-1.5-flash' or 'gemini-1.5-pro' in your model config.`);
+            for (const fallbackModel of fallbackModels) {
+                if (fallbackModel === requestedModel)
+                    continue;
+                try {
+                    logAppEvent("WARN", "Gemini", "GEMINI_FALLBACK", `Model '${requestedModel}' not found. Attempting fallback to ${fallbackModel}.`);
+                    const fallback = genAI.getGenerativeModel({ model: fallbackModel });
+                    const retry = await fallback.generateContent(prompt);
+                    return { text: retry.response.text(), model: fallbackModel };
+                }
+                catch (fallbackErr) {
+                    const fallbackMsg = String(fallbackErr?.message || "").toLowerCase();
+                    const fallbackNotFound = fallbackErr?.status === 404 || fallbackMsg.includes("is not found");
+                    if (!fallbackNotFound)
+                        throw fallbackErr;
+                }
+            }
+            logAppEvent("ERROR", "Gemini", "GEMINI_MODEL_ERROR", `Model '${requestedModel}' is unavailable and fallbacks failed.`);
+            throw new Error(`Gemini model '${requestedModel}' is unavailable. Try 'gemini-2.0-flash' or 'gemini-2.5-flash' in your model config.`);
         }
         logAppEvent("ERROR", "Gemini", "GEMINI_API_ERROR", err.message, { stack: err.stack });
         throw err;

@@ -19,5 +19,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         const subscription = (event, data) => callback(data);
         ipcRenderer.on('tool-event', subscription);
         return () => ipcRenderer.removeListener('tool-event', subscription);
+    },
+    onAIStream: (callback) => {
+        const subscription = (event, data) => callback(data);
+        ipcRenderer.on('ai-stream', subscription);
+        return () => ipcRenderer.removeListener('ai-stream', subscription);
     }
 });

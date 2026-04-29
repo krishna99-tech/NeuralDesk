@@ -22,7 +22,7 @@ function createBrowserFallbackApi() {
         getModels: async () => ({
             openai: { fast: 'gpt-4o-mini', smart: 'gpt-4o', metadata: { 'gpt-4o-mini': { limit: '128k', price: '$0.15/1M' }, 'gpt-4o': { limit: '128k', price: '$2.50/1M' } } },
             claude: { fast: 'claude-3-5-haiku', smart: 'claude-3-5-sonnet', metadata: { 'claude-3-5-haiku': { limit: '200k', price: '$0.25/1M' }, 'claude-3-5-sonnet': { limit: '200k', price: '$3.00/1M' } } },
-            gemini: { fast: 'gemini-1.5-flash', smart: 'gemini-1.5-pro', metadata: { 'gemini-1.5-flash': { limit: '1M', price: 'Free' }, 'gemini-1.5-pro': { limit: '2M', price: '$3.50/1M' } } },
+            gemini: { fast: 'gemini-2.0-flash', smart: 'gemini-2.5-flash', metadata: { 'gemini-2.0-flash': { limit: '1M', price: 'Free/Low' }, 'gemini-2.5-flash': { limit: '1M', price: 'Low' } } },
             ollama: { fast: 'llama3', smart: 'llama3.3', metadata: { 'llama3.3': { limit: '128k', price: 'Local' }, 'llama3': { limit: '128k', price: 'Local' }, 'mistral': { limit: '32k', price: 'Local' } } },
             deepseek: { fast: 'deepseek-chat', smart: 'deepseek-reasoner', metadata: { 'deepseek-chat': { limit: '128k', price: '$0.14/1M' }, 'deepseek-reasoner': { limit: '64k', price: '$0.55/1M' } } },
             aipipe: { fast: 'openai/gpt-5-nano', smart: 'openai/gpt-5-nano', metadata: { 'openai/gpt-5-nano': { limit: '128k', price: '$0.10/1M' } } }
@@ -50,6 +50,7 @@ function createBrowserFallbackApi() {
         getMcpStatuses: async () => ({}),
         openMcpConfigFile: async () => ({ ok: false, error: 'Not available in browser mode' }),
         onToolEvent: (_callback) => () => { },
+        onAIStream: (_callback) => () => { },
         signup: async (creds) => ({ ok: true, user: { username: creds?.username || 'Guest' } }),
         login: async (creds) => ({ ok: true, user: { username: creds?.username || 'Guest' } }),
         checkSession: async () => ({ ok: true }),
@@ -134,6 +135,20 @@ function setToggleState(id, isOn) {
     if (!el)
         return;
     el.classList.toggle('on', !!isOn);
+}
+function setButtonLoadingByOnclick(fnName, isLoading, loadingText = 'Loading...') {
+    const btn = document.querySelector(`button[onclick*="${fnName}"]`);
+    if (!btn) return;
+    if (!btn.dataset.originalText) btn.dataset.originalText = btn.textContent || '';
+    if (isLoading) {
+        btn.disabled = true;
+        btn.classList.add('loading');
+        btn.textContent = loadingText;
+    } else {
+        btn.disabled = false;
+        btn.classList.remove('loading');
+        btn.textContent = btn.dataset.originalText || btn.textContent;
+    }
 }
 /**
  * Dynamically populates the provider select menu based on SUPPORTED_PROVIDERS
@@ -549,6 +564,7 @@ window.newChat = () => {
 window.loadChat = (id) => {
     const chat = window.appData.chatHistory.find(c => c.id === id);
     if (chat) {
+        chatController.resetComposerState();
         window.state.currentChatId = id;
         window.state.messages = [...chat.messages];
         
@@ -575,6 +591,7 @@ window.clearChatHistory = async () => {
     try {
         const res = await window.electronAPI.clearChatHistory(chatId);
         if (res.ok) {
+            chatController.resetComposerState();
             // Clear local state
             window.state.messages = [];
             const chat = window.appData.chatHistory.find(c => c.id === chatId);
@@ -604,9 +621,13 @@ window.deleteChat = async (chatId, event) => {
     try {
         const res = await window.electronAPI.deleteChat(chatId);
         if (res.ok) {
+            chatController.resetComposerState();
+            window.streamState.isGenerating = false;
             window.appData.chatHistory = window.appData.chatHistory.filter(c => c.id !== chatId);
             if (window.state.currentChatId === chatId) {
-                chatController.resetComposerState();
+                window.newChat();
+            }
+            if (!window.appData.chatHistory.length) {
                 window.newChat();
             }
             renderHistory();
@@ -661,10 +682,19 @@ window.toggleTool = (btnId, toolValue) => {
                     const chip = document.createElement('div');
                     chip.className = 'tool-chip';
                     chip.id = `chip-${btnId}`;
-                    chip.innerHTML = `
-                        <span>${toolName}</span>
-                        <span class="remove-tool" onclick="event.stopPropagation(); window.toggleTool('${btnId}')">×</span>
-                    `;
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = toolName;
+                    const closeSpan = document.createElement('span');
+                    closeSpan.className = 'remove-tool';
+                    closeSpan.textContent = '×';
+                    closeSpan.style.cursor = 'pointer';
+                    closeSpan.style.marginLeft = '6px';
+                    closeSpan.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        window.toggleTool(btnId);
+                    });
+                    chip.appendChild(textSpan);
+                    chip.appendChild(closeSpan);
                     container.appendChild(chip);
                 }
             } else {
@@ -681,10 +711,19 @@ window.toggleTool = (btnId, toolValue) => {
                     const sideChip = document.createElement('div');
                     sideChip.className = 'tool-chip';
                     sideChip.id = `side-chip-${btnId}`;
-                    sideChip.innerHTML = `
-                        <span>${toolName}</span>
-                        <span class="remove-tool" onclick="event.stopPropagation(); window.toggleTool('${btnId}')">×</span>
-                    `;
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = toolName;
+                    const closeSpan = document.createElement('span');
+                    closeSpan.className = 'remove-tool';
+                    closeSpan.textContent = '×';
+                    closeSpan.style.cursor = 'pointer';
+                    closeSpan.style.marginLeft = '6px';
+                    closeSpan.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        window.toggleTool(btnId);
+                    });
+                    sideChip.appendChild(textSpan);
+                    sideChip.appendChild(closeSpan);
                     sideList.appendChild(sideChip);
                 }
             } else {
@@ -734,9 +773,16 @@ window.openMcpConfigFile = async () => {
         notReady('Open MCP config file');
         return;
     }
-    const result = await window.electronAPI.openMcpConfigFile();
-    if (!result?.ok) {
-        uiController.showToast(`Unable to open config: ${result?.error || 'unknown error'}`, 'error');
+    setButtonLoadingByOnclick('openMcpConfigFile', true, 'Opening...');
+    try {
+        const result = await window.electronAPI.openMcpConfigFile();
+        if (!result?.ok) {
+            uiController.showToast(`Unable to open config: ${result?.error || 'unknown error'}`, 'error');
+        }
+    } catch (err) {
+        uiController.showToast(`Unable to open config: ${err?.message || 'unknown error'}`, 'error');
+    } finally {
+        setButtonLoadingByOnclick('openMcpConfigFile', false);
     }
 };
 window.addMcpServerFromForm = async () => {
@@ -752,20 +798,27 @@ window.addMcpServerFromForm = async () => {
         uiController.showToast('Server name and command are required', 'error');
         return;
     }
-    const config = (await window.electronAPI.getMcpConfig()) || { mcpServers: {} };
-    config.mcpServers = config.mcpServers || {};
-    config.mcpServers[name] = {
-        command,
-        args: argsRaw.split(',').map(v => v.trim()).filter(Boolean),
-        env: parseEnvText(envRaw)
-    };
-    const saved = await window.electronAPI.saveMcpConfig(config);
-    if (!saved?.ok) {
-        uiController.showToast(`Failed to save MCP server: ${saved?.error || 'unknown error'}`, 'error');
-        return;
+    setButtonLoadingByOnclick('addMcpServerFromForm', true, 'Saving...');
+    try {
+        const config = (await window.electronAPI.getMcpConfig()) || { mcpServers: {} };
+        config.mcpServers = config.mcpServers || {};
+        config.mcpServers[name] = {
+            command,
+            args: argsRaw.split(',').map(v => v.trim()).filter(Boolean),
+            env: parseEnvText(envRaw)
+        };
+        const saved = await window.electronAPI.saveMcpConfig(config);
+        if (!saved?.ok) {
+            uiController.showToast(`Failed to save MCP server: ${saved?.error || 'unknown error'}`, 'error');
+            return;
+        }
+        uiController.showToast('MCP server saved', 'success');
+        await loadMcpConfigIntoUI();
+    } catch (err) {
+        uiController.showToast(`Failed to save MCP server: ${err?.message || 'unknown error'}`, 'error');
+    } finally {
+        setButtonLoadingByOnclick('addMcpServerFromForm', false);
     }
-    uiController.showToast('MCP server saved', 'success');
-    await loadMcpConfigIntoUI();
 };
 window.deleteMcpServer = async (encodedName) => {
     const name = decodeURIComponent(String(encodedName || ''));
@@ -775,18 +828,25 @@ window.deleteMcpServer = async (encodedName) => {
         notReady('Delete MCP server');
         return;
     }
-    const config = (await window.electronAPI.getMcpConfig()) || { mcpServers: {} };
-    config.mcpServers = config.mcpServers || {};
-    if (!config.mcpServers[name]) {
-        uiController.showToast(`MCP server not found: ${name}`, 'error');
-        return;
+    setButtonLoadingByOnclick('deleteMcpServer', true, 'Deleting...');
+    try {
+        const config = (await window.electronAPI.getMcpConfig()) || { mcpServers: {} };
+        config.mcpServers = config.mcpServers || {};
+        if (!config.mcpServers[name]) {
+            uiController.showToast(`MCP server not found: ${name}`, 'error');
+            return;
+        }
+        delete config.mcpServers[name];
+        const saved = await window.electronAPI.saveMcpConfig(config);
+        if (!saved?.ok) {
+            uiController.showToast(`Failed to delete MCP server: ${saved?.error || 'unknown error'}`, 'error');
+            return;
+        }
+        uiController.showToast(`Deleted MCP server: ${name}`, 'success');
+        await loadMcpConfigIntoUI();
+    } catch (err) {
+        uiController.showToast(`Failed to delete MCP server: ${err?.message || 'unknown error'}`, 'error');
+    } finally {
+        setButtonLoadingByOnclick('deleteMcpServer', false);
     }
-    delete config.mcpServers[name];
-    const saved = await window.electronAPI.saveMcpConfig(config);
-    if (!saved?.ok) {
-        uiController.showToast(`Failed to delete MCP server: ${saved?.error || 'unknown error'}`, 'error');
-        return;
-    }
-    uiController.showToast(`Deleted MCP server: ${name}`, 'success');
-    await loadMcpConfigIntoUI();
 };
