@@ -394,6 +394,9 @@ export class ChatController {
         this.usageMetrics.status = 'error';
       }
     } finally {
+      if (typeof window.refreshToolCalls === 'function') {
+        window.refreshToolCalls();
+      }
       if (typeof streamUnsub === 'function') streamUnsub();
       window.streamState.isGenerating = false;
       this.abortController = null;

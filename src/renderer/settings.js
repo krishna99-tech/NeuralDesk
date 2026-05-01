@@ -7,6 +7,23 @@ function normalizeTheme(theme) {
 }
 export class SettingsController {
     async saveSettings() {
+        const secretPairs = [
+            ['api.openai', document.getElementById('openaiKey')?.value || ''],
+            ['api.anthropic', document.getElementById('anthropicKey')?.value || ''],
+            ['api.gemini', document.getElementById('geminiKey')?.value || ''],
+            ['api.deepseek', document.getElementById('deepseekKey')?.value || ''],
+            ['api.aipipe', document.getElementById('aipipeKey')?.value || ''],
+            ['external.github', document.getElementById('githubToken')?.value || ''],
+            ['external.notion', document.getElementById('notionKey')?.value || ''],
+            ['external.linear', document.getElementById('linearKey')?.value || ''],
+            ['external.slackWebhook', document.getElementById('slackWebhook')?.value || ''],
+            ['external.discordWebhook', document.getElementById('discordWebhook')?.value || '']
+        ];
+        for (const [name, value] of secretPairs) {
+            if (value && window.electronAPI?.vaultSetSecret) {
+                await window.electronAPI.vaultSetSecret(name, value);
+            }
+        }
         const systemPrompt = document.getElementById('systemPromptText')?.value || '';
         const settings = {
             ai: {
@@ -35,11 +52,11 @@ export class SettingsController {
                 ollamaBaseUrl: document.getElementById('ollamaBaseUrl')?.value || ''
             },
             apiKeys: {
-                anthropic: document.getElementById('anthropicKey')?.value,
-                gemini: document.getElementById('geminiKey')?.value,
-                openai: document.getElementById('openaiKey')?.value,
-                deepseek: document.getElementById('deepseekKey')?.value,
-                aipipe: document.getElementById('aipipeKey')?.value,
+                anthropic: document.getElementById('anthropicKey')?.value || '',
+                gemini: document.getElementById('geminiKey')?.value || '',
+                openai: document.getElementById('openaiKey')?.value || '',
+                deepseek: document.getElementById('deepseekKey')?.value || '',
+                aipipe: document.getElementById('aipipeKey')?.value || '',
             },
             external: {
                 githubToken: document.getElementById('githubToken')?.value || '',

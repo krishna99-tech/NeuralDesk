@@ -93,5 +93,17 @@ db.exec(`
     model TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS tool_calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sessionId TEXT,
+    serverName TEXT,
+    toolName TEXT,
+    input TEXT,
+    output TEXT,
+    ok INTEGER DEFAULT 0,
+    latencyMs INTEGER DEFAULT 0,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 exports.default = db;

@@ -116,8 +116,31 @@ switch (`$Command.ToLowerInvariant()) {
         }
         break
     }
+    "uninstall" {
+        `$confirm = Read-Host "Are you sure you want to uninstall $AppName? (y/N)"
+        if (`$confirm -notmatch '^yY?$') {
+            Write-Host "Uninstall cancelled."
+            break
+        }
+
+        `$procs = Get-Process -Name `$procName -ErrorAction SilentlyContinue
+        if (`$procs) {
+            `$procs | Stop-Process -Force
+            Write-Host "Stopped `$procName"
+        }
+        if (Test-Path "$InstallDir") {
+            Remove-Item -Path "$InstallDir" -Recurse -Force
+            Write-Host "Removed installation directory: $InstallDir"
+        }
+        `$uPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        `$bDir = [IO.Path]::GetFullPath("$BinDir").TrimEnd('\')
+        `$nPath = (`$uPath.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries) | Where-Object { try { [IO.Path]::GetFullPath(`$_.Trim()).TrimEnd('\') -ne `$bDir } catch { `$true } }) -join ';'
+        [Environment]::SetEnvironmentVariable("Path", `$nPath, "User")
+        Write-Host "uninstalled completly"
+        break
+    }
     default {
-        Write-Host "Usage: $AppName [run|stop|status]"
+        Write-Host "Usage: $AppName [run|stop|status|uninstall]"
         exit 1
     }
 }
@@ -164,5 +187,6 @@ Write-Host "Or open a new terminal and run:"
 Write-Host "  $AppName run"
 Write-Host "  $AppName stop"
 Write-Host "  $AppName status"
+Write-Host "  $AppName uninstall"
 Write-Host ""
 Write-Host "Tip: If command is not recognized immediately, restart terminal."

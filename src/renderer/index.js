@@ -54,6 +54,13 @@ function createBrowserFallbackApi() {
             return { ok: true, config };
         },
         getMcpStatuses: async () => ({}),
+        getToolCalls: async () => [],
+        exportToolCalls: async () => ({ ok: false, error: 'Not available in browser mode' }),
+        vaultSetSecret: async (_name, _value) => ({ ok: false, error: 'Not available in browser mode' }),
+        vaultGetSecret: async (_name) => ({ ok: false, value: '' }),
+        vaultDeleteSecret: async (_name) => ({ ok: false, error: 'Not available in browser mode' }),
+        vaultListMeta: async () => ({ ok: true, items: [] }),
+        launchOAuth: async (_payload) => ({ ok: false, error: 'Not available in browser mode' }),
         openMcpConfigFile: async () => ({ ok: false, error: 'Not available in browser mode' }),
         onToolEvent: (_callback) => () => { },
         onAIStream: (_callback) => () => { },
@@ -321,6 +328,7 @@ function renderMcpLists(config, statuses) {
                 : status === 'starting' ? 'checking'
                     : 'offline';
             const encodedName = encodeURIComponent(name);
+            const credentialRef = String(server?.credentialRef || '').trim();
             return `
         <div class="memory-item">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
@@ -331,6 +339,7 @@ function renderMcpLists(config, statuses) {
             <span class="connection-badge ${statusClass}">${statusText}</span>
             <span>${escapeHtml(server?.command || '')} ${escapeHtml(args)}</span>
           </div>
+          <div class="text-xs text-muted mt-1">${credentialRef ? `Credential: ${escapeHtml(credentialRef)}` : 'Credential: none'}</div>
         </div>
       `;
         }).join('')
@@ -339,6 +348,41 @@ function renderMcpLists(config, statuses) {
         settingsList.innerHTML = html;
     if (panelList)
         panelList.innerHTML = html;
+}
+function renderToolCalls(rows) {
+    const list = document.getElementById('panelToolCallsList');
+    if (!list)
+        return;
+    const items = Array.isArray(rows) ? rows : [];
+    if (!items.length) {
+        list.innerHTML = '<div class="memory-item"><div class="memory-label">No tool calls yet</div><div>Run an MCP-enabled request to populate this view.</div></div>';
+        return;
+    }
+    list.innerHTML = items.map((row) => {
+        const ok = Number(row.ok) === 1;
+        const statusClass = ok ? 'running' : 'missing';
+        const when = row.createdAt ? new Date(row.createdAt).toLocaleString() : '';
+        const output = String(row.output || '').replace(/\s+/g, ' ').slice(0, 180);
+        return `
+      <div class="memory-item key-status key-status-${statusClass}">
+        <div class="memory-label">${escapeHtml(row.toolName || 'tool')} <span class="key-status-badge key-status-badge-${statusClass}">${ok ? 'ok' : 'error'}</span></div>
+        <div>${escapeHtml(String(row.serverName || 'server'))} · ${escapeHtml(String(row.latencyMs || 0))}ms</div>
+        <div class="text-muted-xs mt-2px">${escapeHtml(output)}</div>
+        <div class="text-xs text-muted mt-4px">${escapeHtml(when)}</div>
+      </div>
+    `;
+    }).join('');
+}
+async function loadToolCallsIntoUI() {
+    if (!window.electronAPI?.getToolCalls)
+        return;
+    try {
+        const rows = await window.electronAPI.getToolCalls(100);
+        renderToolCalls(rows);
+    }
+    catch (err) {
+        console.error('Failed to load tool calls:', err);
+    }
 }
 async function loadMcpConfigIntoUI() {
     if (!window.electronAPI?.getMcpConfig)
@@ -386,6 +430,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             window.appData.settings = settings;
         await applySettingsToUI(window.appData.settings);
         await loadMcpConfigIntoUI();
+        await loadToolCallsIntoUI();
         // Initial Render
         updateUIFromState();
         updateModelOptions();
@@ -460,6 +505,7 @@ window.refreshSettingsPanels = () => {
     applyTopbarState(window.appData.settings?.topbar || {});
     uiController.updateIncognitoIndicator(window.appData.settings?.privacy?.incognito);
 };
+window.refreshToolCalls = () => loadToolCallsIntoUI();
 window.switchView = (view, el) => router.switchView(view, el);
 window.sendMessage = () => {
     chatController.sendMessage(collectActiveTools());
@@ -771,6 +817,55 @@ window.checkConnection = async () => {
 window.toggleRightPanel = () => uiController.toggleRightPanel();
 window.switchPanelTab = (tabId, el) => uiController.switchPanelTab(tabId, el);
 window.closeOnOutside = (event, modalId, closeFn) => uiController.closeOnOutside(event, modalId, closeFn);
+window.exportToolCalls = async () => {
+    if (!window.electronAPI?.exportToolCalls) {
+        uiController.showToast('Tool log export is not available', 'error');
+        return;
+    }
+    const res = await window.electronAPI.exportToolCalls();
+    if (res?.ok) {
+        uiController.showToast(`Exported ${res.count} tool calls`, 'success');
+    }
+};
+window.launchOAuth = async (provider) => {
+    const providerMap = {
+        google: {
+            key: 'oauth.google.code',
+            authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+            redirectUri: 'http://localhost/oauth/callback'
+        },
+        github: {
+            key: 'oauth.github.code',
+            authUrl: 'https://github.com/login/oauth/authorize',
+            redirectUri: 'http://localhost/oauth/callback'
+        },
+        slack: {
+            key: 'oauth.slack.code',
+            authUrl: 'https://slack.com/oauth/v2/authorize',
+            redirectUri: 'http://localhost/oauth/callback'
+        }
+    };
+    const cfg = providerMap[String(provider || '').toLowerCase()];
+    if (!cfg || !window.electronAPI?.launchOAuth) {
+        uiController.showToast('OAuth launcher is not available', 'error');
+        return;
+    }
+    const authUrl = prompt(`Enter ${provider} OAuth URL`, cfg.authUrl);
+    if (!authUrl) return;
+    const redirectUri = prompt(`Enter ${provider} redirect URI`, cfg.redirectUri);
+    if (!redirectUri) return;
+    const res = await window.electronAPI.launchOAuth({ authUrl, redirectUri });
+    if (!res?.ok) {
+        uiController.showToast(`OAuth failed: ${res?.error || 'unknown error'}`, 'error');
+        return;
+    }
+    if (res.code && window.electronAPI?.vaultSetSecret) {
+        await window.electronAPI.vaultSetSecret(cfg.key, res.code);
+        uiController.showToast(`${provider} OAuth code captured and saved in vault`, 'success');
+    } else {
+        uiController.showToast(`${provider} OAuth completed`, 'success');
+    }
+};
 window.setArtifactView = (v) => uiController.setArtifactView(v);
 window.closeArtifact = () => uiController.closeArtifact();
 window.handleKey = (e) => uiController.handleKey(e, () => chatController.sendMessage());
@@ -817,6 +912,7 @@ window.addMcpServerFromForm = async () => {
     const name = document.getElementById('mcpServerName')?.value?.trim();
     const command = document.getElementById('mcpServerCommand')?.value?.trim();
     const argsRaw = document.getElementById('mcpServerArgs')?.value || '';
+    const credentialRef = document.getElementById('mcpServerCredentialRef')?.value?.trim() || '';
     const envRaw = document.getElementById('mcpServerEnv')?.value || '';
     if (!name || !command) {
         uiController.showToast('Server name and command are required', 'error');
@@ -829,7 +925,8 @@ window.addMcpServerFromForm = async () => {
         config.mcpServers[name] = {
             command,
             args: argsRaw.split(',').map(v => v.trim()).filter(Boolean),
-            env: parseEnvText(envRaw)
+            env: parseEnvText(envRaw),
+            credentialRef
         };
         const saved = await window.electronAPI.saveMcpConfig(config);
         if (!saved?.ok) {

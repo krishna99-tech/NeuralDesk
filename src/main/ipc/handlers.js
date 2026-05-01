@@ -47,11 +47,18 @@ const fs = __importStar(require("fs"));
 const child_process_1 = require("child_process");
 const client_1 = __importDefault(require("../mcp/client"));
 const registry_1 = require("../mcp/registry");
+const connectionManager_1 = require("../mcp/services/connectionManager");
+const vault = require("../security/vault");
 const session_1 = __importDefault(require("../core/session"));
 const intentParser_1 = require("../core/intentParser");
 const dataService_1 = require("../services/dataService");
 const mcpRuntime = new Map();
 const logger = require("../logger");
+const mcpConnectionManager = new connectionManager_1.McpConnectionManager({
+    startServer: (name, server) => startMcpServer(name, server),
+    stopServer: (name) => stopMcpServer(name),
+    getStatuses: () => getMcpStatuses()
+});
 function getMcpConfigPath() {
     return path.join(electron_1.app.getPath("userData"), "mcp_config.json");
 }
@@ -78,7 +85,8 @@ function normalizeMcpConfig(raw) {
                 chatCommand: entry.chatCommand || "",
                 chatArgs: Array.isArray(entry.chatArgs) ? entry.chatArgs : [],
                 chatEnv: entry.chatEnv && typeof entry.chatEnv === "object" ? entry.chatEnv : {},
-                chatTimeoutMs: Number(entry.chatTimeoutMs) > 0 ? Number(entry.chatTimeoutMs) : undefined
+                chatTimeoutMs: Number(entry.chatTimeoutMs) > 0 ? Number(entry.chatTimeoutMs) : undefined,
+                credentialRef: entry.credentialRef || ""
             };
         }
         cfg.mcpServers = mapped;
@@ -148,6 +156,11 @@ function startMcpServer(name, server) {
     const command = String(server?.command || "").trim();
     const args = Array.isArray(server?.args) ? server.args : [];
     const env = server?.env && typeof server.env === "object" ? server.env : {};
+    const credentialRef = String(server?.credentialRef || "").trim();
+    const credentialSecret = credentialRef ? vault.getSecret(credentialRef) : "";
+    const envWithCredential = credentialSecret
+        ? { ...env, MCP_CREDENTIAL: credentialSecret }
+        : env;
     if (!name || !command)
         return;
     const existing = mcpRuntime.get(name);
@@ -173,7 +186,7 @@ function startMcpServer(name, server) {
             windowsHide: true,
             env: {
                 ...process.env,
-                ...env
+                ...envWithCredential
             }
         });
         runtime.process = child;
@@ -201,7 +214,7 @@ function startMcpServer(name, server) {
             logStream.write(`[${new Date().toISOString()}] closed exitCode=${code}\n`);
             logStream.end();
         });
-        const mcpClient = new client_1.default(name, command, args, env);
+        const mcpClient = new client_1.default(name, command, args, envWithCredential);
         mcpClient.connect().then(ok => {
             if (ok)
                 registry_1.activeClients.set(name, mcpClient);
@@ -227,6 +240,7 @@ function startConfiguredMcpServers() {
     for (const [name, server] of Object.entries(servers)) {
         startMcpServer(name, server);
     }
+    mcpConnectionManager.startHealthMonitor(() => readMcpConfig(), 15000);
 }
 function getMcpStatuses() {
     const config = readMcpConfig();
@@ -364,6 +378,11 @@ function getMcpChatExecutionSpec(name, server) {
     const startupCommand = String(server?.command || "").trim();
     const startupArgs = Array.isArray(server?.args) ? server.args : [];
     const startupEnv = server?.env && typeof server.env === "object" ? server.env : {};
+    const credentialRef = String(server?.credentialRef || "").trim();
+    const credentialSecret = credentialRef ? vault.getSecret(credentialRef) : "";
+    const startupEnvWithCredential = credentialSecret
+        ? { ...startupEnv, MCP_CREDENTIAL: credentialSecret }
+        : startupEnv;
     const startupTimeout = Number(server?.timeoutMs) > 0 ? Number(server.timeoutMs) : 45000;
     const chatCommand = String(server?.chatCommand || "").trim();
     const chatArgs = Array.isArray(server?.chatArgs) ? server.chatArgs : [];
@@ -375,7 +394,7 @@ function getMcpChatExecutionSpec(name, server) {
             name,
             command: chatCommand,
             args: chatArgs,
-            env: { ...startupEnv, ...chatEnv },
+            env: { ...startupEnvWithCredential, ...chatEnv },
             timeoutMs: chatTimeout
         };
     }
@@ -384,7 +403,7 @@ function getMcpChatExecutionSpec(name, server) {
         name,
         command: startupCommand,
         args: startupArgs,
-        env: startupEnv,
+        env: startupEnvWithCredential,
         timeoutMs: startupTimeout
     };
 }
@@ -471,9 +490,88 @@ function formatMcpResultsForUser(results) {
         return parts.join("\n");
     }).join("\n");
 }
+function persistToolCalls(sessionId, input, results) {
+    if (!Array.isArray(results) || results.length === 0)
+        return;
+    const insert = sqlite_1.default.prepare(`
+        INSERT INTO tool_calls (sessionId, serverName, toolName, input, output, ok, latencyMs)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const r of results) {
+        const output = [r.stdout || "", r.stderr || ""].filter(Boolean).join("\n\n").slice(0, 12000);
+        insert.run(sessionId, r.name || "unknown", r.name || "mcp_tool", String(input || ""), output, r.ok ? 1 : 0, Number(r.durationMs || 0));
+    }
+}
 function isGreetingInput(raw) {
     const text = String(raw || "").trim().toLowerCase();
     return /^(hi|hello|hey|yo|sup|good morning|good afternoon|good evening|hola)\b[!.?]*$/.test(text);
+}
+function launchOAuthFlow(payload) {
+    return new Promise((resolve) => {
+        const authUrl = String(payload?.authUrl || "").trim();
+        const redirectUri = String(payload?.redirectUri || "").trim();
+        if (!authUrl || !redirectUri) {
+            resolve({ ok: false, error: "authUrl and redirectUri are required" });
+            return;
+        }
+        const parent = electron_1.BrowserWindow.getFocusedWindow() || null;
+        const win = new electron_1.BrowserWindow({
+            width: 980,
+            height: 760,
+            parent,
+            modal: !!parent,
+            autoHideMenuBar: true,
+            webPreferences: {
+                contextIsolation: true,
+                sandbox: true
+            }
+        });
+        let settled = false;
+        const done = (result) => {
+            if (settled)
+                return;
+            settled = true;
+            try {
+                if (!win.isDestroyed())
+                    win.close();
+            }
+            catch { }
+            resolve(result);
+        };
+        const handleUrl = (url) => {
+            if (!url || !url.startsWith(redirectUri))
+                return false;
+            try {
+                const u = new URL(url);
+                const code = u.searchParams.get("code");
+                const error = u.searchParams.get("error");
+                if (error) {
+                    done({ ok: false, error, url });
+                }
+                else {
+                    done({ ok: !!code, code, url });
+                }
+            }
+            catch (err) {
+                done({ ok: false, error: err?.message || "Invalid redirect URL" });
+            }
+            return true;
+        };
+        win.webContents.on("will-redirect", (event, url) => {
+            if (handleUrl(url))
+                event.preventDefault();
+        });
+        win.webContents.on("will-navigate", (event, url) => {
+            if (handleUrl(url))
+                event.preventDefault();
+        });
+        win.on("closed", () => {
+            if (!settled) {
+                done({ ok: false, error: "OAuth window closed before completion" });
+            }
+        });
+        win.loadURL(authUrl);
+    });
 }
 function registerIpcHandlers() {
     sqlite_1.default.exec(`
@@ -622,6 +720,9 @@ function registerIpcHandlers() {
             }
             session_1.default.pushMessage(sessionId, "assistant", result.text);
             const mcpOutputSummary = mcpEnabled ? formatMcpResultsForUser(mcpResults) : "";
+            if (mcpEnabled && mcpResults.length > 0) {
+                persistToolCalls(sessionId, userInput, mcpResults);
+            }
             const logOutput = mcpEnabled && mcpOutputSummary
                 ? `${result.text}\n\nMCP Tool Output:\n${mcpOutputSummary}`
                 : result.text;
@@ -769,6 +870,60 @@ function registerIpcHandlers() {
         const filePath = getMcpConfigPath();
         const error = await electron_1.shell.openPath(filePath);
         return { ok: !error, error, path: filePath };
+    });
+    electron_1.ipcMain.handle("vault-set-secret", async (_, { name, value }) => {
+        return vault.setSecret(name, value);
+    });
+    electron_1.ipcMain.handle("vault-get-secret", async (_, name) => {
+        return { ok: true, value: vault.getSecret(name) };
+    });
+    electron_1.ipcMain.handle("vault-delete-secret", async (_, name) => {
+        return vault.deleteSecret(name);
+    });
+    electron_1.ipcMain.handle("vault-list-meta", async () => {
+        return { ok: true, items: vault.listSecretMetadata() };
+    });
+    electron_1.ipcMain.handle("oauth-launch", async (_, payload) => {
+        return await launchOAuthFlow(payload || {});
+    });
+    electron_1.ipcMain.handle("get-tool-calls", async (_, limit = 100) => {
+        try {
+            const capped = Math.min(Math.max(Number(limit) || 100, 1), 500);
+            const rows = sqlite_1.default.prepare(`
+                SELECT id, sessionId, serverName, toolName, input, output, ok, latencyMs, createdAt
+                FROM tool_calls
+                ORDER BY id DESC
+                LIMIT ?
+            `).all(capped);
+            return rows;
+        }
+        catch (err) {
+            return [];
+        }
+    });
+    electron_1.ipcMain.handle("export-tool-calls", async () => {
+        try {
+            const rows = sqlite_1.default.prepare(`
+                SELECT id, sessionId, serverName, toolName, input, output, ok, latencyMs, createdAt
+                FROM tool_calls
+                ORDER BY id DESC
+                LIMIT 5000
+            `).all();
+            const defaultName = `tool-calls-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+            const save = await electron_1.dialog.showSaveDialog({
+                title: "Export Tool Calls",
+                defaultPath: defaultName,
+                filters: [{ name: "JSON", extensions: ["json"] }]
+            });
+            if (save.canceled || !save.filePath) {
+                return { ok: false, canceled: true };
+            }
+            fs.writeFileSync(save.filePath, JSON.stringify(rows, null, 2), "utf8");
+            return { ok: true, path: save.filePath, count: rows.length };
+        }
+        catch (err) {
+            return { ok: false, error: err?.message || String(err) };
+        }
     });
     electron_1.ipcMain.handle("clear-chat-history", async (_, chatId) => {
         try {
