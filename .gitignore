@@ -27,3 +27,4 @@ mcp_config.json
 # OS metadata
 .DS_Store
 Thumbs.db
+*package-lock.json
